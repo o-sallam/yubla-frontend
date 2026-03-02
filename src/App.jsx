@@ -4,7 +4,7 @@ import legacyScript from './legacy/legacyScript.js?raw';
 
 function App() {
   useEffect(() => {
-    const apiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+    const apiBase = (import.meta.env.VITE_API_BASE || 'https://yubla-backend-production.up.railway.app').replace(/\/+$/, '');
     window.__APP_API_BASE__ = apiBase;
     const runLegacy = new Function('API_BASE', legacyScript);
     runLegacy(apiBase);

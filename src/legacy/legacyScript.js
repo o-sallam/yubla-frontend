@@ -1,7 +1,7 @@
 ﻿    const DRAFT_KEY = "school_grades_draft_v7";
 
     const API_BASE_URL = String(
-      (typeof API_BASE !== "undefined" && API_BASE) || window.__APP_API_BASE__ || "http://localhost:3000"
+      (typeof API_BASE !== "undefined" && API_BASE) || window.__APP_API_BASE__ || "https://yubla-backend-production.up.railway.app"
     )
       .trim()
       .replace(/\/+$/, "");
