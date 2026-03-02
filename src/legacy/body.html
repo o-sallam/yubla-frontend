@@ -1,0 +1,612 @@
+﻿<!-- ═══ LOGIN SCREEN ═══ -->
+  <div id="loginScreen">
+    <div class="login-card">
+      <div class="login-top">
+        <div class="login-icon">🏫</div>
+        <div class="login-title">نظام قياس التعليمي</div>
+        <div class="login-sub">يرجى تسجيل الدخول للمتابعة</div>
+      </div>
+      <div class="login-role">
+        <button class="role-btn active" type="button" data-login-role="teacher">معلمة</button>
+        <button class="role-btn" type="button" data-login-role="admin">مديرة</button>
+        <button class="role-btn" type="button" data-login-role="super">أدمن</button>
+      </div>
+      <div class="login-field">
+        <label>اسم المستخدم</label>
+        <input type="text" id="loginUser" placeholder="أدخل اسم المستخدم" autocomplete="username" autocapitalize="none" />
+      </div>
+      <div class="login-field">
+        <label>كلمة المرور</label>
+        <input type="password" id="loginPass" placeholder="أدخل كلمة المرور" autocomplete="current-password" />
+      </div>
+      <div class="login-err" id="loginErr">
+        <span>✕</span>
+        <span id="loginErrMsg">اسم المستخدم أو كلمة المرور غير صحيحة</span>
+      </div>
+      <button class="login-btn" id="loginBtn">
+        <span class="login-btn-text">دخول</span>
+        <span class="login-btn-spinner"></span>
+      </button>
+      <div class="login-footer-row">
+        <div class="login-footer">مدرسة يبلا الثانوية للبنات &mdash; نظام إدخال العلامات</div>
+        <button type="button" class="login-info-btn" id="loginInfoBtn" title="معلومات التواصل" aria-label="معلومات التواصل">
+          !
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ADMIN SCREEN ═══ -->
+  <div id="adminScreen">
+    <div class="admin-wrap">
+
+      <!-- Topbar -->
+      <div class="admin-topbar">
+        <div class="admin-topbar-left">
+          <button class="account-btn" id="acctOpenBtnAdmin" title="إعدادات الحساب">⚙</button>
+          <div class="admin-title-text">
+          <h2>لوحة تحليل البيانات</h2>
+            <p id="adminWelcomeText">مدرسة يبلا الثانوية للبنات — حساب المديرة</p>
+          </div>
+        </div>
+        <div class="admin-topbar-right">
+          <button class="info" id="adminRefresh">⟳ تحديث البيانات</button>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="admin-filter-card">
+        <div class="card-header">
+          <div class="h-title">الفلاتر</div>
+          <button class="danger" id="adminClearFilters" style="padding:6px 12px;font-size:12px;">✕ مسح الفلاتر</button>
+        </div>
+        <div class="admin-filter-body">
+          <div class="filter-grid">
+            <div class="fg1"><label>المعلمة</label><select id="af-teacher"><option value="">— الكل —</option></select></div>
+            <div class="fg1"><label>الصف</label><select id="af-grade"><option value="">— الكل —</option></select></div>
+            <div class="fg1"><label>الشعبة</label><select id="af-section"><option value="">— الكل —</option></select></div>
+            <div class="fg1"><label>المادة</label><select id="af-subject"><option value="">— الكل —</option></select></div>
+            <div class="fg1"><label>الامتحان</label><select id="af-exam"><option value="">— الكل —</option></select></div>
+            <div class="fg1"><label>التقييم</label>
+              <select id="af-level">
+                <option value="">— الكل —</option>
+                <option value="ممتاز">ممتاز</option>
+                <option value="جيد">جيد</option>
+                <option value="ضعيف">ضعيف</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="stats-grid">
+        <div class="stat-card info-card">
+          <div class="stat-icon">👩‍🎓</div>
+          <div class="stat-val" id="sc-count">—</div>
+          <div class="stat-lbl">عدد الطالبات</div>
+          <div class="stat-sub" id="sc-count-lbl">بعد الفلترة</div>
+        </div>
+        <div class="stat-card" id="sc-recall-card">
+          <div class="stat-icon">🧠</div>
+          <div class="stat-val" id="sc-recall">—</div>
+          <div class="stat-lbl">متوسط التذكر</div>
+          <div class="stat-sub" id="sc-recall-n">— طالبة</div>
+        </div>
+        <div class="stat-card" id="sc-understand-card">
+          <div class="stat-icon">💡</div>
+          <div class="stat-val" id="sc-understand">—</div>
+          <div class="stat-lbl">متوسط الفهم</div>
+          <div class="stat-sub" id="sc-understand-n">— طالبة</div>
+        </div>
+        <div class="stat-card" id="sc-hots-card">
+          <div class="stat-icon">🔬</div>
+          <div class="stat-val" id="sc-hots">—</div>
+          <div class="stat-lbl">متوسط المهارات العليا</div>
+          <div class="stat-sub" id="sc-hots-n">— طالبة</div>
+        </div>
+        <div class="stat-card" id="sc-total-card">
+          <div class="stat-icon">📊</div>
+          <div class="stat-val" id="sc-total">—</div>
+          <div class="stat-lbl">متوسط العلامة الكلية</div>
+          <div class="stat-sub" id="sc-total-n">— طالبة</div>
+        </div>
+        <div class="stat-card ok-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-val" id="sc-pass">—</div>
+          <div class="stat-lbl">الناجحات</div>
+          <div class="stat-sub" id="sc-pass-pct">—%</div>
+        </div>
+        <div class="stat-card bad-card">
+          <div class="stat-icon">❌</div>
+          <div class="stat-val" id="sc-fail">—</div>
+          <div class="stat-lbl">الراسبات</div>
+          <div class="stat-sub" id="sc-fail-pct">—%</div>
+        </div>
+      </div>
+
+      <!-- Results Table -->
+      <div class="admin-table-card">
+        <div class="admin-table-header">
+          <div class="h-title" style="display:flex;align-items:center;gap:8px;">
+            <span style="width:3px;height:18px;border-radius:3px;background:linear-gradient(180deg,var(--accent),var(--info));display:block;"></span>
+            نتائج الطالبات
+            <span class="chip" id="admin-count-chip" style="font-size:11px;padding:3px 10px;">0 سجل</span>
+          </div>
+          <div class="admin-search-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="adminSearch" placeholder="بحث بالاسم…" />
+          </div>
+        </div>
+        <div class="admin-table-scroll">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>اسم الطالبة</th>
+                <th>المعلمة</th>
+                <th>الصف / الشعبة</th>
+                <th>المادة</th>
+                <th>الامتحان</th>
+                <th>التذكر</th>
+                <th>الفهم</th>
+                <th>المهارات العليا</th>
+                <th>المجموع</th>
+                <th>التقييم</th>
+                <th>الخطة العلاجية</th>
+              </tr>
+            </thead>
+            <tbody id="adminTbody">
+              <tr class="loading-row"><td colspan="12">جاري تحميل البيانات… <span class="spinner"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-table-footer">
+          <div id="admin-footer-info" style="color:var(--muted);font-size:12px;">—</div>
+          <div id="admin-footer-batch" style="font-family:var(--mono);font-size:11px;color:var(--muted);">—</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SUPER ADMIN SCREEN -->
+  <div id="superScreen">
+    <div class="super-wrap">
+      <div class="super-topbar">
+        <div class="super-topbar-left">
+          <button class="account-btn" id="acctOpenBtnSuper" title="إعدادات الحساب">⚙</button>
+          <div class="super-title-text">
+            <h2>لوحة الأدمن</h2>
+            <p id="superWelcomeText">مرحبًا بك في إدارة المنصة</p>
+          </div>
+        </div>
+        <div class="super-topbar-right">
+          <button class="info" id="superRefreshBtn">⟳ تحديث البيانات</button>
+          <button class="danger" id="superResetSchoolsBtn">🗑 مسح جميع بيانات المدارس</button>
+        </div>
+      </div>
+
+      <div class="super-stats-grid">
+        <div class="stat-card info-card">
+          <div class="stat-icon">🏫</div>
+          <div class="stat-val" id="superStatTenants">—</div>
+          <div class="stat-lbl">المدارس</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👤</div>
+          <div class="stat-val" id="superStatUsers">—</div>
+          <div class="stat-lbl">الحسابات</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👩‍🎓</div>
+          <div class="stat-val" id="superStatStudents">—</div>
+          <div class="stat-lbl">الطالبات</div>
+        </div>
+        <div class="stat-card ok-card">
+          <div class="stat-icon">🧾</div>
+          <div class="stat-val" id="superStatSubmissions">—</div>
+          <div class="stat-lbl">سجلات العلامات</div>
+        </div>
+      </div>
+
+      <div class="super-grid">
+        <div class="main-card">
+          <div class="card-header">
+            <div class="h-title">إضافة أدمن منصة</div>
+          </div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="f4">
+                <label>اسم المستخدم</label>
+                <input type="text" id="superAdminUserName" placeholder="admin.username" />
+              </div>
+              <div class="f4">
+                <label>الاسم المعروض</label>
+                <input type="text" id="superAdminDisplay" placeholder="الاسم الظاهر" />
+              </div>
+              <div class="f4">
+                <label>كلمة المرور</label>
+                <input type="text" id="superAdminPassword" placeholder="password" />
+              </div>
+              <div class="f12">
+                <button class="primary" id="superCreateAdminBtn">+ إنشاء أدمن منصة</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-card">
+        <div class="card-header">
+          <div class="h-title">استيراد ملفات Excel للمعلمات والطالبات</div>
+        </div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="f6">
+              <label>ملف المعلمات XLSX</label>
+              <input
+                type="file"
+                id="superTeachersCsvFile"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              />
+            </div>
+            <div class="f6">
+              <label>ملف الطالبات XLSX</label>
+              <input
+                type="file"
+                id="superStudentsCsvFile"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              />
+            </div>
+            <div class="f6">
+              <button class="info" id="superImportTeachersBtn">⬆ استيراد المعلمات من XLSX</button>
+            </div>
+            <div class="f6">
+              <button class="info" id="superImportStudentsBtn">⬆ استيراد الطالبات من XLSX</button>
+            </div>
+            <div class="f12">
+              <div class="status-bar" id="superImportResult" style="display:none;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-card">
+        <div class="card-header">
+          <div class="h-title">المدارس</div>
+        </div>
+        <div class="card-body">
+          <div class="table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>الكود</th>
+                  <th>الاسم</th>
+                  <th>المدينة</th>
+                  <th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody id="superTenantsTbody">
+                <tr class="loading-row"><td colspan="5">جارٍ التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-card">
+        <div class="card-header">
+          <div class="h-title">الحسابات</div>
+        </div>
+        <div class="card-body">
+          <div class="table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>اسم المستخدم</th>
+                  <th>كلمة المرور</th>
+                  <th>الاسم المعروض</th>
+                  <th>الدور</th>
+                  <th>الحالة</th>
+                  <th>المدرسة</th>
+                  <th>عمليات</th>
+                </tr>
+              </thead>
+              <tbody id="superUsersTbody">
+                <tr class="loading-row"><td colspan="8">جارٍ التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-card">
+        <div class="card-header">
+          <div class="h-title">المعلمات (مع حذف)</div>
+        </div>
+        <div class="card-body">
+          <div class="table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>رقم المعلمة</th>
+                  <th>اسم المعلمة</th>
+                  <th>اسم المستخدم</th>
+                  <th>المدرسة</th>
+                  <th>حذف</th>
+                </tr>
+              </thead>
+              <tbody id="superTeachersTbody">
+                <tr class="loading-row"><td colspan="6">جارٍ التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-card">
+        <div class="card-header">
+          <div class="h-title">الطالبات (مع حذف)</div>
+        </div>
+        <div class="card-body">
+          <div class="table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>رقم الطالبة</th>
+                  <th>اسم الطالبة</th>
+                  <th>الصف</th>
+                  <th>الشعبة</th>
+                  <th>المدرسة</th>
+                  <th>حذف</th>
+                </tr>
+              </thead>
+              <tbody id="superStudentsTbody">
+                <tr class="loading-row"><td colspan="7">جارٍ التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap" id="teacherApp" style="display:none;">
+
+    <!-- ═══ TOPBAR ═══ -->
+    <div class="topbar">
+      <div class="account-area">
+        <button class="account-btn" id="acctOpenBtn" title="إعدادات الحساب">⚙</button>
+        <div class="account-user-text" id="teacherWelcomeText"></div>
+      </div>
+      <div class="school-logo">
+        <div class="school-info">
+          <h1>نظام إدخال العلامات</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="info" id="btnLoadLookups">⟳ تحديث القوائم</button>
+        <button class="danger" id="btnClearDraft">🗑 تفريغ الكل</button>
+        <button class="primary submit-main btn-submit-top" id="btnSubmit">✓ إرسال البيانات</button>
+      </div>
+    </div>
+
+    <!-- ═══ CLASS INFO ═══ -->
+    <div class="main-card">
+      <div class="card-header">
+        <div class="h-title">بيانات الصف</div>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="f6">
+            <label>الصف</label>
+            <select id="grade"></select>
+          </div>
+          <div class="f6">
+            <label>الشعبة</label>
+            <select id="section"></select>
+          </div>
+          <div class="f12">
+            <button class="accent" id="btnAutoFill" style="width:100%;padding:11px;">✦ تعبئة تلقائية لأسماء الطالبات</button>
+          </div>
+        </div>
+      </div>
+  </div>
+
+  <!-- ═══ EXAM INFO ═══ -->
+  <div class="main-card">
+      <div class="card-header exam-header">
+        <div class="h-title">بيانات الامتحان</div>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="f6">
+            <label>اسم المعلمة</label>
+            <select id="teacher"></select>
+          </div>
+          <div class="f6">
+            <label>المادة</label>
+            <select id="subject"></select>
+          </div>
+          <div class="f12">
+            <div class="section-divider"></div>
+          </div>
+          <div class="f6">
+            <label>نوع الامتحان</label>
+            <select id="exam"></select>
+          </div>
+          <div class="f6">&nbsp;</div>
+
+          <div class="f3">
+            <label>الحد الأعلى — التذكر</label>
+            <input type="number" id="maxRecall" min="0" step="1" value="10" />
+          </div>
+          <div class="f3">
+            <label>الحد الأعلى — الفهم</label>
+            <input type="number" id="maxUnderstand" min="0" step="1" value="5" />
+          </div>
+          <div class="f3">
+            <label>الحد الأعلى — المهارات العليا</label>
+            <input type="number" id="maxHots" min="0" step="1" value="5" />
+          </div>
+          <div class="f3">
+            <label>العلامة الكلية (محسوبة)</label>
+            <input type="number" id="totalMax" min="0" step="1" value="20" readonly />
+          </div>
+
+          <div class="f12">
+            <div class="status-bar" id="statusBox">
+              <div class="dot" id="statusDot"></div>
+              <div>
+                <div class="status-msg" id="statusMsg"></div>
+                <div class="status-sub" id="statusSub"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+    </div>
+  </div>
+
+  <!-- ═══ TABLE SECTION ═══ -->
+  <div class="main-card table-section">
+      <div class="card-header">
+        <div class="h-title">جدول الطالبات</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span class="chip" id="validChip">التحقق: غير مطبق</span>
+          <button class="danger" id="btnClearScores">✕ مسح الدرجات</button>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- Student Spotlight -->
+        <div class="student-spotlight" id="studentSpotlight">
+          <div class="spotlight-inner">
+            <div class="spotlight-icon">👤</div>
+            <div class="spotlight-content">
+              <div class="spotlight-label">الطالبة الحالية</div>
+              <div class="spotlight-name" id="spotlightName">—</div>
+            </div>
+            <div class="spotlight-row-num" id="spotlightRow">#—</div>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th class="row-num">#</th>
+                <th style="min-width:220px;">اسم الطالبة</th>
+                <th class="num-cell">التذكر</th>
+                <th class="num-cell">الفهم</th>
+                <th class="num-cell">المهارات العليا</th>
+                <th class="total-cell">المجموع</th>
+                <th class="plan-cell">الخطة العلاجية</th>
+                <th style="min-width:90px;">التقييم</th>
+                <th style="min-width:64px;">حذف</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="table-footer">
+          <div class="footer-info">آخر دفعة: <span class="mono" id="lastBatch">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ CONTACT INFO MODAL ═══ -->
+  <div class="modal-overlay" id="contactInfoModal">
+    <div class="modal-box info-modal">
+      <div class="modal-header">
+        <div class="modal-title">معلومات التواصل</div>
+      </div>
+      <div class="modal-message" style="margin-bottom:12px;">
+        <div class="info-row">
+          <div class="info-row-title">للأمور الإدارية</div>
+          <div class="info-row-text">مديرة مدرسة يبلا الثانوية الشاملة للبنات: الطاف العلي</div>
+          <div class="info-row-text">هاتف: 0790003344</div>
+        </div>
+        <div class="section-divider" style="margin:10px 0;"></div>
+        <div class="info-row">
+          <div class="info-row-title">للأمور التقنية</div>
+          <div class="info-row-text">معلمة الفيزياء بمدرسة يبلا الثانوية الشاملة للبنات : سجود العزام</div>
+          <div class="info-row-text">هاتف: 0790001122</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" id="contactInfoClose">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ACCOUNT MODAL ═══ -->
+  <div class="modal-overlay" id="accountModal">
+    <div class="modal-box account-modal">
+      <div class="modal-header">
+        <button class="danger" id="acctLogoutBtn">تسجيل خروج</button>
+        <div class="modal-title">إعدادات الحساب</div>
+      </div>
+      <div class="modal-message">
+        <div class="form-grid">
+          <div class="f12">
+            <label>اسم المستخدم الحالي</label>
+            <input type="text" id="acctUser" readonly />
+          </div>
+          <div class="f12">
+            <label>كلمة المرور الحالية</label>
+            <input type="text" id="acctCurrentPass" placeholder="أدخل كلمة المرور الحالية" />
+          </div>
+          <div class="f6">
+            <label>اسم مستخدم جديد</label>
+            <input type="text" id="acctNewUser" placeholder="اسم مستخدم جديد" />
+          </div>
+          <div class="f6">
+            <label>كلمة مرور جديدة</label>
+            <input type="text" id="acctNewPass" placeholder="كلمة مرور جديدة" />
+          </div>
+          <div class="f12">
+            <div class="status-bar" id="acctMsg" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="acctModalCancel">إلغاء</button>
+        <button class="primary" id="acctSaveBtn">تحديث</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ GLOBAL LOADING OVERLAY ═══ -->
+  <div class="modal-overlay" id="globalLoading">
+    <div class="modal-box loading-box">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="globalLoadingText">يرجى الانتظار...</div>
+      <div class="loading-sub" id="globalLoadingSub"></div>
+      <div class="loading-actions">
+        <button type="button" class="danger loading-close" id="globalLoadingClose">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL ═══ -->
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal-box">
+      <div class="modal-title">⚠️ تنبيه</div>
+      <div class="modal-message" id="modalMessage">
+        البيانات لم يتم تعبئتها بشكل كامل.<br/>
+        هل تريد إرسال الحقول الفارغة كأصفار؟
+      </div>
+      <div class="modal-actions">
+        <button id="modalCancel">لا، أرجع للتعديل</button>
+        <button class="primary" id="modalConfirm">نعم، أرسل</button>
+      </div>
+    </div>
+  </div>
+
