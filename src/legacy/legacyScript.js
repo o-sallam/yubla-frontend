@@ -1475,7 +1475,6 @@
       const loginInfoBtn = document.getElementById('loginInfoBtn');
       const contactInfoModal = document.getElementById('contactInfoModal');
       const contactInfoClose = document.getElementById('contactInfoClose');
-      const loginRoleBtns = document.querySelectorAll('[data-login-role]');
       const teacherLogout = document.getElementById('teacherLogout');
       const adminLogout  = document.getElementById('adminLogout');
       const acctOpenBtn = document.getElementById('acctOpenBtn');
@@ -1494,8 +1493,6 @@
       const teacherWelcomeText = document.getElementById('teacherWelcomeText');
       const adminWelcomeText = document.getElementById('adminWelcomeText');
       const superWelcomeText = document.getElementById('superWelcomeText');
-
-      let selectedRole = 'teacher';
 
       function mapApiRoleToUiRole(apiRole) {
         if (apiRole === 'teacher') return 'teacher';
@@ -1554,16 +1551,6 @@
             ? `أهلاً ${safeName} - إدارة ${schoolName}`
             : `أهلاً ${safeName}`;
         }
-      }
-
-      if (loginRoleBtns && loginRoleBtns.length) {
-        loginRoleBtns.forEach(btn => {
-          btn.addEventListener('click', () => {
-            loginRoleBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedRole = btn.getAttribute('data-login-role') || 'teacher';
-          });
-        });
       }
 
       function openAccountModal() {
@@ -1633,11 +1620,12 @@
           }
           const roleFromApi = (res.user && res.user.role) ? res.user.role : '';
           const uiRole = mapApiRoleToUiRole(roleFromApi);
-          if (selectedRole && uiRole && uiRole !== selectedRole) {
-            selectedRole = uiRole;
+          if (!uiRole) {
+            showError('نوع الحساب غير مدعوم');
+            return;
           }
           try {
-            sessionStorage.setItem(SESSION_KEY, uiRole || selectedRole);
+            sessionStorage.setItem(SESSION_KEY, uiRole);
             sessionStorage.setItem(SESSION_USER_KEY, (res.user && res.user.username) ? res.user.username : user);
             sessionStorage.setItem(SESSION_TOKEN_KEY, res.accessToken || '');
             sessionStorage.setItem(
@@ -1653,9 +1641,9 @@
           setWelcomeText(
             (res.user && (res.user.displayName || res.user.username)) ? (res.user.displayName || res.user.username) : user,
             (res.tenant && res.tenant.name) ? res.tenant.name : '',
-            uiRole || selectedRole
+            uiRole
           );
-          applySession(uiRole || selectedRole);
+          applySession(uiRole);
         } catch (err) {
           showError('تعذر تسجيل الدخول');
         } finally {
