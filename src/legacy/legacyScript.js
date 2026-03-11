@@ -54,6 +54,13 @@
     let lastDraftHeader = null;
     let clearingAll = false;
     let tableContext = { grade: "", section: "" };
+    const renderLucideIcons = () => {
+      if (typeof window.__renderLucideIcons__ === "function") {
+        window.__renderLucideIcons__();
+      }
+    };
+    const iconMarkup = (name, extraClass = "") =>
+      `<i data-lucide="${name}"${extraClass ? ` class="${extraClass}"` : ""} aria-hidden="true"></i>`;
 
     /* ── Utilities ── */
     function setStatus(type, msg, sub="") {
@@ -164,7 +171,7 @@
         <td class="total-cell"><input type="number" class="total" readonly value="${esc(data.total??0)}"/></td>
         <td class="plan-cell"><input type="text" class="planInput" value="${esc(data.plan||"")}" placeholder="خطة علاجية (1–30 حرف)" maxlength="30"/></td>
         <td><span class="chip level-chip">—</span></td>
-        <td><button class="danger del-btn" style="padding:6px 10px;font-size:12px;">✕</button></td>
+        <td><button class="danger del-btn" style="padding:6px 10px;font-size:12px;" title="حذف" aria-label="حذف">${iconMarkup("x")}</button></td>
       `;
 
       const iName = tr.querySelector(".studentName");
@@ -227,6 +234,7 @@
     function setRows(names) {
       tbody.innerHTML="";
       names.forEach((n,i) => tbody.appendChild(makeRow({studentName:n,recall:"",understand:"",hots:"",total:"",plan:""}, i+1)));
+      renderLucideIcons();
       tableContext = { grade: gradeSel.value.trim(), section: sectionSel.value.trim() };
       updateValidationChip();
       updateAutoFillButtonState();
@@ -262,8 +270,14 @@
         if(r>mr||u>mu||h>mh) bad++;
       }
       if(!any) { validChip.textContent="التحقق: لا توجد بيانات"; validChip.className="chip"; return; }
-      if(bad===0) { validChip.textContent="✓ جميع الدرجات ضمن الحدود"; validChip.className="chip ok"; }
-      else        { validChip.textContent=`✕ يوجد ${bad} سطر خارج الحدود`; validChip.className="chip bad"; }
+      if(bad===0) {
+        validChip.innerHTML = `${iconMarkup("circle-check-big")}<span>جميع الدرجات ضمن الحدود</span>`;
+        validChip.className="chip ok";
+      } else {
+        validChip.innerHTML = `${iconMarkup("circle-x")}<span>يوجد ${bad} سطر خارج الحدود</span>`;
+        validChip.className="chip bad";
+      }
+      renderLucideIcons();
     }
     function hasTableRows() {
       return tbody && tbody.querySelectorAll("tr").length > 0;
@@ -271,7 +285,8 @@
     function updateAutoFillButtonState() {
       const btn = $("btnAutoFill");
       if (!btn) return;
-      btn.textContent = "⟳ تحديث الطالبات حسب الصف/الشعبة الحالية";
+      btn.innerHTML = `${iconMarkup("refresh-cw")}<span>تحديث الطالبات حسب الصف/الشعبة الحالية</span>`;
+      renderLucideIcons();
     }
 
     /* ── API ── */
@@ -367,7 +382,7 @@
           teacherSel.disabled = false;
           if ((j.teachers || []).length === 1 && !teacherSel.value) teacherSel.value = j.teachers[0];
         }
-        setStatus("ok","تم تحميل القوائم بنجاح ✅");
+        setStatus("ok","تم تحميل القوائم بنجاح");
         succeed("تم تحديث القوائم بنجاح");
         scheduleDraftSave();
       } catch(e) {
@@ -389,7 +404,7 @@
         if(!j.ok) throw new Error(j.error||"فشل");
         const list=j.students||[];
         setRows(list);
-        setStatus("ok",`تمت تعبئة ${list.length} طالبة ✅`);
+        setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
         succeed("تم جلب البيانات بنجاح");
       } catch(e) {
         setStatus("bad","تعذر تعبئة الطالبات",e.message);
@@ -458,7 +473,7 @@
         const j=await apiPost({action:"submit",...payload});
         if(!j.ok) throw new Error(j.error||"فشل");
         lastBatch.textContent=j.batchId||"—";
-        setStatus("ok",`تم الإرسال بنجاح ✅ (${j.inserted} سجل)`,`BatchID: ${j.batchId}`);
+        setStatus("ok",`تم الإرسال بنجاح (${j.inserted} سجل)`,`BatchID: ${j.batchId}`);
         clearDraft();
         succeed("تم إرسال البيانات بنجاح");
       } catch(e) {
@@ -506,6 +521,7 @@
       computeTotalMax();
       tbody.innerHTML="";
       (st.rows||[]).forEach((r,i)=>tbody.appendChild(makeRow(r,i+1)));
+      renderLucideIcons();
       tableContext = { grade: h.grade || "", section: h.section || "" };
       updateValidationChip();
       updateAutoFillButtonState();
@@ -549,6 +565,7 @@
     function boot() {
       if (window.__legacyBooted) return;
       window.__legacyBooted = true;
+      renderLucideIcons();
       computeTotalMax();
       ["teacher","grade","section","subject","exam"].forEach(id=>fillSelect($(id),[],"— اختر —"));
 
@@ -973,9 +990,10 @@
           if (footer) footer.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA');
         } catch(e) {
           tbody.innerHTML = `<tr class="loading-row"><td colspan="12" style="color:var(--bad);">
-            ⚠ ${esc(e.message)}<br/>
+            ${iconMarkup("triangle-alert")} ${esc(e.message)}<br/>
             <span style="font-size:11px;opacity:0.7;">تعذر تحميل البيانات من الخادم</span>
           </td></tr>`;
+          renderLucideIcons();
           fail("تعذر تحميل البيانات");
         }
       }

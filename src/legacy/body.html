@@ -2,7 +2,7 @@
   <div id="loginScreen">
     <div class="login-card">
       <div class="login-top">
-        <div class="login-icon">🏫</div>
+        <div class="login-icon"><i data-lucide="school" aria-hidden="true"></i></div>
         <div class="login-title">نظام قياس التعليمي</div>
         <div class="login-sub">يرجى تسجيل الدخول للمتابعة</div>
       </div>
@@ -15,7 +15,7 @@
         <input type="password" id="loginPass" placeholder="أدخل كلمة المرور" autocomplete="current-password" />
       </div>
       <div class="login-err" id="loginErr">
-        <span>✕</span>
+        <span class="err-icon"><i data-lucide="circle-x" aria-hidden="true"></i></span>
         <span id="loginErrMsg">اسم المستخدم أو كلمة المرور غير صحيحة</span>
       </div>
       <button class="login-btn" id="loginBtn">
@@ -25,7 +25,7 @@
       <div class="login-footer-row">
         <div class="login-footer">مدرسة يبلا الثانوية للبنات &mdash; نظام إدخال العلامات</div>
         <button type="button" class="login-info-btn" id="loginInfoBtn" title="معلومات التواصل" aria-label="معلومات التواصل">
-          !
+          <i data-lucide="circle-help" aria-hidden="true"></i>
         </button>
       </div>
     </div>
@@ -38,14 +38,14 @@
       <!-- Topbar -->
       <div class="admin-topbar">
         <div class="admin-topbar-left">
-          <button class="account-btn" id="acctOpenBtnAdmin" title="إعدادات الحساب">⚙</button>
+          <button class="account-btn" id="acctOpenBtnAdmin" title="إعدادات الحساب" aria-label="إعدادات الحساب"><i data-lucide="settings" aria-hidden="true"></i></button>
           <div class="admin-title-text">
           <h2>لوحة تحليل البيانات</h2>
             <p id="adminWelcomeText">مدرسة يبلا الثانوية للبنات — حساب المديرة</p>
           </div>
         </div>
         <div class="admin-topbar-right">
-          <button class="info" id="adminRefresh">⟳ تحديث البيانات</button>
+          <button class="info with-icon" id="adminRefresh"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>تحديث البيانات</span></button>
         </div>
       </div>
 
@@ -53,7 +53,7 @@
       <div class="admin-filter-card">
         <div class="card-header">
           <div class="h-title">الفلاتر</div>
-          <button class="danger" id="adminClearFilters" style="padding:6px 12px;font-size:12px;">✕ مسح الفلاتر</button>
+          <button class="danger with-icon" id="adminClearFilters" style="padding:6px 12px;font-size:12px;"><i data-lucide="x" aria-hidden="true"></i><span>مسح الفلاتر</span></button>
         </div>
         <div class="admin-filter-body">
           <div class="filter-grid">
@@ -77,43 +77,43 @@
       <!-- Stats Cards -->
       <div class="stats-grid">
         <div class="stat-card info-card">
-          <div class="stat-icon">👩‍🎓</div>
+          <div class="stat-icon"><i data-lucide="graduation-cap" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-count">—</div>
           <div class="stat-lbl">عدد الطالبات</div>
           <div class="stat-sub" id="sc-count-lbl">بعد الفلترة</div>
         </div>
         <div class="stat-card" id="sc-recall-card">
-          <div class="stat-icon">🧠</div>
+          <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-recall">—</div>
           <div class="stat-lbl">متوسط التذكر</div>
           <div class="stat-sub" id="sc-recall-n">— طالبة</div>
         </div>
         <div class="stat-card" id="sc-understand-card">
-          <div class="stat-icon">💡</div>
+          <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-understand">—</div>
           <div class="stat-lbl">متوسط الفهم</div>
           <div class="stat-sub" id="sc-understand-n">— طالبة</div>
         </div>
         <div class="stat-card" id="sc-hots-card">
-          <div class="stat-icon">🔬</div>
+          <div class="stat-icon"><i data-lucide="microscope" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-hots">—</div>
           <div class="stat-lbl">متوسط المهارات العليا</div>
           <div class="stat-sub" id="sc-hots-n">— طالبة</div>
         </div>
         <div class="stat-card" id="sc-total-card">
-          <div class="stat-icon">📊</div>
+          <div class="stat-icon"><i data-lucide="chart-column" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-total">—</div>
           <div class="stat-lbl">متوسط العلامة الكلية</div>
           <div class="stat-sub" id="sc-total-n">— طالبة</div>
         </div>
         <div class="stat-card ok-card">
-          <div class="stat-icon">✅</div>
+          <div class="stat-icon"><i data-lucide="circle-check-big" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-pass">—</div>
           <div class="stat-lbl">الناجحات</div>
           <div class="stat-sub" id="sc-pass-pct">—%</div>
         </div>
         <div class="stat-card bad-card">
-          <div class="stat-icon">❌</div>
+          <div class="stat-icon"><i data-lucide="circle-x" aria-hidden="true"></i></div>
           <div class="stat-val" id="sc-fail">—</div>
           <div class="stat-lbl">الراسبات</div>
           <div class="stat-sub" id="sc-fail-pct">—%</div>
@@ -129,7 +129,7 @@
             <span class="chip" id="admin-count-chip" style="font-size:11px;padding:3px 10px;">0 سجل</span>
           </div>
           <div class="admin-search-wrap">
-            <span class="search-icon">🔍</span>
+            <span class="search-icon"><i data-lucide="search" aria-hidden="true"></i></span>
             <input type="text" id="adminSearch" placeholder="بحث بالاسم…" />
           </div>
         </div>
@@ -170,36 +170,36 @@
     <div class="super-wrap">
       <div class="super-topbar">
         <div class="super-topbar-left">
-          <button class="account-btn" id="acctOpenBtnSuper" title="إعدادات الحساب">⚙</button>
+          <button class="account-btn" id="acctOpenBtnSuper" title="إعدادات الحساب" aria-label="إعدادات الحساب"><i data-lucide="settings" aria-hidden="true"></i></button>
           <div class="super-title-text">
             <h2>لوحة الأدمن</h2>
             <p id="superWelcomeText">مرحبًا بك في إدارة المنصة</p>
           </div>
         </div>
         <div class="super-topbar-right">
-          <button class="info" id="superRefreshBtn">⟳ تحديث البيانات</button>
-          <button class="danger" id="superResetSchoolsBtn">🗑 مسح جميع بيانات المدارس</button>
+          <button class="info with-icon" id="superRefreshBtn"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>تحديث البيانات</span></button>
+          <button class="danger with-icon" id="superResetSchoolsBtn"><i data-lucide="trash-2" aria-hidden="true"></i><span>مسح جميع بيانات المدارس</span></button>
         </div>
       </div>
 
       <div class="super-stats-grid">
         <div class="stat-card info-card">
-          <div class="stat-icon">🏫</div>
+          <div class="stat-icon"><i data-lucide="school" aria-hidden="true"></i></div>
           <div class="stat-val" id="superStatTenants">—</div>
           <div class="stat-lbl">المدارس</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">👤</div>
+          <div class="stat-icon"><i data-lucide="user-round" aria-hidden="true"></i></div>
           <div class="stat-val" id="superStatUsers">—</div>
           <div class="stat-lbl">الحسابات</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">👩‍🎓</div>
+          <div class="stat-icon"><i data-lucide="graduation-cap" aria-hidden="true"></i></div>
           <div class="stat-val" id="superStatStudents">—</div>
           <div class="stat-lbl">الطالبات</div>
         </div>
         <div class="stat-card ok-card">
-          <div class="stat-icon">🧾</div>
+          <div class="stat-icon"><i data-lucide="receipt-text" aria-hidden="true"></i></div>
           <div class="stat-val" id="superStatSubmissions">—</div>
           <div class="stat-lbl">سجلات العلامات</div>
         </div>
@@ -225,7 +225,7 @@
                 <input type="text" id="superAdminPassword" placeholder="password" />
               </div>
               <div class="f12">
-                <button class="primary" id="superCreateAdminBtn">+ إنشاء أدمن منصة</button>
+                <button class="primary with-icon" id="superCreateAdminBtn"><i data-lucide="plus" aria-hidden="true"></i><span>إنشاء أدمن منصة</span></button>
               </div>
             </div>
           </div>
@@ -255,10 +255,10 @@
               />
             </div>
             <div class="f6">
-              <button class="info" id="superImportTeachersBtn">⬆ استيراد المعلمات من XLSX</button>
+              <button class="info with-icon" id="superImportTeachersBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد المعلمات من XLSX</span></button>
             </div>
             <div class="f6">
-              <button class="info" id="superImportStudentsBtn">⬆ استيراد الطالبات من XLSX</button>
+              <button class="info with-icon" id="superImportStudentsBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد الطالبات من XLSX</span></button>
             </div>
             <div class="f12">
               <div class="status-bar" id="superImportResult" style="display:none;"></div>
@@ -376,7 +376,7 @@
     <!-- ═══ TOPBAR ═══ -->
     <div class="topbar">
       <div class="account-area">
-        <button class="account-btn" id="acctOpenBtn" title="إعدادات الحساب">⚙</button>
+        <button class="account-btn" id="acctOpenBtn" title="إعدادات الحساب" aria-label="إعدادات الحساب"><i data-lucide="settings" aria-hidden="true"></i></button>
         <div class="account-user-text" id="teacherWelcomeText"></div>
       </div>
       <div class="school-logo">
@@ -385,9 +385,9 @@
         </div>
       </div>
       <div class="top-actions">
-        <button class="info" id="btnLoadLookups">⟳ تحديث القوائم</button>
-        <button class="danger" id="btnClearDraft">🗑 تفريغ الكل</button>
-        <button class="primary submit-main btn-submit-top" id="btnSubmit">✓ إرسال البيانات</button>
+        <button class="info with-icon" id="btnLoadLookups"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>تحديث القوائم</span></button>
+        <button class="danger with-icon" id="btnClearDraft"><i data-lucide="trash-2" aria-hidden="true"></i><span>تفريغ الكل</span></button>
+        <button class="primary submit-main btn-submit-top with-icon" id="btnSubmit"><i data-lucide="send" aria-hidden="true"></i><span>إرسال البيانات</span></button>
       </div>
     </div>
 
@@ -407,7 +407,7 @@
             <select id="section"></select>
           </div>
           <div class="f12">
-            <button class="accent" id="btnAutoFill" style="width:100%;padding:11px;">✦ تعبئة تلقائية لأسماء الطالبات</button>
+            <button class="accent with-icon" id="btnAutoFill" style="width:100%;padding:11px;"><i data-lucide="sparkles" aria-hidden="true"></i><span>تعبئة تلقائية لأسماء الطالبات</span></button>
           </div>
         </div>
       </div>
@@ -473,7 +473,7 @@
         <div class="h-title">جدول الطالبات</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <span class="chip" id="validChip">التحقق: غير مطبق</span>
-          <button class="danger" id="btnClearScores">✕ مسح الدرجات</button>
+          <button class="danger with-icon" id="btnClearScores"><i data-lucide="x" aria-hidden="true"></i><span>مسح الدرجات</span></button>
         </div>
       </div>
       <div class="card-body">
@@ -481,7 +481,7 @@
         <!-- Student Spotlight -->
         <div class="student-spotlight" id="studentSpotlight">
           <div class="spotlight-inner">
-            <div class="spotlight-icon">👤</div>
+            <div class="spotlight-icon"><i data-lucide="user-round" aria-hidden="true"></i></div>
             <div class="spotlight-content">
               <div class="spotlight-label">الطالبة الحالية</div>
               <div class="spotlight-name" id="spotlightName">—</div>
@@ -593,7 +593,7 @@
   <!-- ═══ MODAL ═══ -->
   <div class="modal-overlay" id="confirmModal">
     <div class="modal-box">
-      <div class="modal-title">⚠️ تنبيه</div>
+      <div class="modal-title with-icon"><i data-lucide="triangle-alert" aria-hidden="true"></i><span>تنبيه</span></div>
       <div class="modal-message" id="modalMessage">
         البيانات لم يتم تعبئتها بشكل كامل.<br/>
         هل تريد إرسال الحقول الفارغة كأصفار؟

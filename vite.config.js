@@ -8,7 +8,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'https://yubla-backend-production.up.railway.app',
+        target: 'http://localhost:3000',
         changeOrigin: true
       }
     }
