@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap');
     :root {
       --bg0: #070d1a;
       --bg1: #0c1528;
@@ -20,7 +20,7 @@
       --r-sm: 12px;
       --r-xs: 8px;
       --mono: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-      --font: 'IBM Plex Sans Arabic', system-ui, 'Noto Sans Arabic', Tahoma, sans-serif;
+      --font: 'Tajawal', system-ui, 'Noto Sans Arabic', Tahoma, sans-serif;
     }
     * { box-sizing:border-box; margin:0; padding:0; }
     html { direction:rtl; scroll-behavior:smooth; }
