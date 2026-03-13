@@ -39,6 +39,30 @@
     const globalLoading = $("globalLoading");
     const globalLoadingText = $("globalLoadingText");
     const globalLoadingSub = $("globalLoadingSub");
+    const studentSearchInput = $("studentSearchInput");
+    const btnVoiceEntry = $("btnVoiceEntry");
+    const voicePanel = $("voicePanel");
+    const voiceCurrentSn = $("voiceCurrentSn");
+    const voiceSnInput = $("voiceSnInput");
+    const voiceCurrentStudent = $("voiceCurrentStudent");
+    const voiceListeningStatus = $("voiceListeningStatus");
+    const voiceRecallVal = $("voiceRecallVal");
+    const voiceUnderstandVal = $("voiceUnderstandVal");
+    const voiceHotsVal = $("voiceHotsVal");
+    const voiceTokensPreview = $("voiceTokensPreview");
+    const voiceStartBtn = $("voiceStartBtn");
+    const voiceStopBtn = $("voiceStopBtn");
+    const voiceUndoBtn = $("voiceUndoBtn");
+    const voiceCloseBtn = $("voiceCloseBtn");
+    const adminPrintBtn = $("adminPrint");
+    const btnPrint = $("btnPrint");
+    const printModal = $("printModal");
+    const printModalClose = $("printModalClose");
+    const printModalTitle = $("printModalTitle");
+    const printSheet = $("printSheet");
+    const quickNotice = $("quickNotice");
+    const quickNoticeText = $("quickNoticeText");
+    const quickNoticeBtn = $("quickNoticeBtn");
 
     let pendingSubmit = null;
     const DRAFT_MODULE = "teacher";
@@ -53,7 +77,51 @@
     let draftTimer = null;
     let lastDraftHeader = null;
     let clearingAll = false;
+    let rowSeq = 0;
+    let selectedRowId = "";
+    let selectedAdminRowId = "";
+    let rowViewTimer = null;
+    let activePrintContext = "teacher";
+    let voiceSnInputTimer = null;
     let tableContext = { grade: "", section: "" };
+    const rowNameCollator = new Intl.Collator("ar", { sensitivity: "base", numeric: true });
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const supportsSpeechSynthesis =
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      typeof window.SpeechSynthesisUtterance !== "undefined";
+    const voiceState = {
+      isOpen: false,
+      listening: false,
+      recognition: null,
+      buffer: [],
+      tokenPreview: [],
+      interimTokens: [],
+      activeRowId: "",
+      undoStack: [],
+      shouldKeepListening: false,
+      restartTimer: null,
+      lastProcessedResultIndex: 0,
+      lastOverflowNoticeAt: 0,
+      repeatFillTimer: null
+    };
+    const gridEditableCols = ["studentName", "recall", "understand", "hots", "planInput"];
+    const gridNumericCols = new Set(["recall", "understand", "hots"]);
+    const gridInputSelector = "input.studentName, input.recall, input.understand, input.hots, input.planInput";
+    const gridSelectorByCol = {
+      studentName: ".studentName",
+      recall: ".recall",
+      understand: ".understand",
+      hots: ".hots",
+      planInput: ".planInput"
+    };
+    const gridState = {
+      selectedKeys: new Set(),
+      anchorKey: "",
+      dragging: false,
+      undoStack: []
+    };
+    const GRID_UNDO_LIMIT = 120;
     const renderLucideIcons = () => {
       if (typeof window.__renderLucideIcons__ === "function") {
         window.__renderLucideIcons__();
@@ -117,6 +185,7 @@
       globalLoading.classList.remove("visible","loading-error","loading-success");
     }
     function num(v) { const n=Number(v); return Number.isFinite(n)?n:0; }
+    const WEAK_SKILL_THRESHOLD_PCT = 60;
     function esc(s) {
       return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     }
@@ -133,12 +202,180 @@
       totalMaxEl.value = num(maxRecallEl.value) + num(maxUnderstandEl.value) + num(maxHotsEl.value);
       validateAllRows();
     }
+    function getWeakSkills(r,u,h,mr,mu,mh) {
+      const maxRecall = Number(mr);
+      const maxUnderstand = Number(mu);
+      const maxHots = Number(mh);
+      if (!(maxRecall > 0) || !(maxUnderstand > 0) || !(maxHots > 0)) return null;
+      const skills = [
+        { label: "التذكر", score: Number(r) || 0, max: maxRecall },
+        { label: "الفهم", score: Number(u) || 0, max: maxUnderstand },
+        { label: "المهارات العليا", score: Number(h) || 0, max: maxHots }
+      ];
+      return skills
+        .filter((item) => ((item.score / item.max) * 100) < WEAK_SKILL_THRESHOLD_PCT)
+        .map((item) => item.label);
+    }
+    function computeEstimate(total, totalMax) {
+      const max = Number(totalMax);
+      if (!(max > 0)) return { txt: "—", cls: "", pct: null };
+      const score = Math.max(0, Number(total) || 0);
+      const pct = (score / max) * 100;
+      if (pct >= 90) return { txt: "ممتاز", cls: "ok", pct };
+      if (pct >= 80) return { txt: "جيد جدًا", cls: "ok", pct };
+      if (pct >= 70) return { txt: "جيد", cls: "warn", pct };
+      if (pct >= 60) return { txt: "مقبول", cls: "warn", pct };
+      if (pct >= 50) return { txt: "ضعيف", cls: "bad", pct };
+      return { txt: "راسب", cls: "bad", pct };
+    }
+    function computeSkillScale(r, u, h, mr, mu, mh) {
+      const weakSkills = getWeakSkills(r, u, h, mr, mu, mh);
+      if (!weakSkills) return { code: "—", txt: "—", cls: "" };
+      const key = weakSkills.join("|");
+      const map = {
+        "": { code: 1, txt: "لا يوجد ضعف", cls: "ok" },
+        "التذكر": { code: 2, txt: "ضعف في التذكر", cls: "warn" },
+        "الفهم": { code: 3, txt: "ضعف في الفهم", cls: "warn" },
+        "المهارات العليا": { code: 4, txt: "ضعف في المهارات العليا", cls: "warn" },
+        "التذكر|الفهم": { code: 5, txt: "ضعف في التذكر والفهم", cls: "bad" },
+        "التذكر|المهارات العليا": { code: 6, txt: "ضعف في التذكر والمهارات العليا", cls: "bad" },
+        "الفهم|المهارات العليا": { code: 7, txt: "ضعف في الفهم والمهارات العليا", cls: "bad" },
+        "التذكر|الفهم|المهارات العليا": { code: 8, txt: "ضعف عام في جميع المهارات", cls: "bad" }
+      };
+      return map[key] || { code: "—", txt: "—", cls: "" };
+    }
+    function formatSkillScale(scale) {
+      if (!scale || scale.code === "—") return "—";
+      return `${scale.txt}`;
+    }
+    function isWeakLevel(levelText) {
+      return String(levelText || "").startsWith("ضعف");
+    }
     function computeLevel(r,u,h,mr,mu,mh) {
-      if(mr<=0||mu<=0||mh<=0) return {txt:"—",cls:""};
-      const pr=r/mr*100, pu=u/mu*100, ph=h/mh*100;
-      if(pr<50||pu<50||ph<50) return {txt:"ضعيف",cls:"bad"};
-      if(pr>=80&&pu>=80&&ph>=80) return {txt:"ممتاز",cls:"ok"};
-      return {txt:"جيد",cls:"warn"};
+      const scale = computeSkillScale(r, u, h, mr, mu, mh);
+      if (scale.code === "—") return { txt: "—", cls: "" };
+      if (scale.code === 8) return { txt: "ضعف عام", cls: "bad" };
+      return { txt: scale.txt, cls: scale.cls };
+    }
+    function hideQuickNotice() {
+      if (!quickNotice) return;
+      clearTimeout(showQuickNotice._timer);
+      quickNotice.classList.remove("show", "require-ack");
+    }
+    function ensureQuickNoticeUi() {
+      if (!quickNotice) return { textEl: null, btnEl: null };
+      let textEl = quickNotice.querySelector(".quick-notice-text");
+      if (!textEl) {
+        textEl = document.createElement("div");
+        textEl.className = "quick-notice-text";
+        quickNotice.appendChild(textEl);
+      }
+      let btnEl = quickNotice.querySelector(".quick-notice-btn");
+      if (!btnEl) {
+        btnEl = document.createElement("button");
+        btnEl.type = "button";
+        btnEl.className = "quick-notice-btn";
+        btnEl.textContent = "حسنًا";
+        quickNotice.appendChild(btnEl);
+      }
+      btnEl.onclick = () => hideQuickNotice();
+      return { textEl, btnEl };
+    }
+    function showQuickNotice(message, type = "info", timeoutMs = 2200, options = {}) {
+      if (!quickNotice) return;
+      const requireAck = options.requireAck !== false;
+      const { textEl } = ensureQuickNoticeUi();
+      if (textEl) textEl.textContent = message || "";
+      quickNotice.className = `quick-notice show ${type}${requireAck ? " require-ack" : ""}`;
+      clearTimeout(showQuickNotice._timer);
+      if (!requireAck) {
+        showQuickNotice._timer = setTimeout(() => {
+          hideQuickNotice();
+        }, timeoutMs);
+      }
+    }
+    function getStudentRows() {
+      return [...tbody.querySelectorAll("tr.student-row")];
+    }
+    function getVisibleStudentRows() {
+      return getStudentRows().filter((tr) => tr.style.display !== "none");
+    }
+    function getRowName(tr) {
+      return (tr?.querySelector(".studentName")?.value || "").trim();
+    }
+    function getLevelFromRow(tr) {
+      const text = (tr?.dataset?.levelText || "").trim();
+      if (text) return text;
+      const r = num(tr?.querySelector(".recall")?.value);
+      const u = num(tr?.querySelector(".understand")?.value);
+      const h = num(tr?.querySelector(".hots")?.value);
+      const mr = num(maxRecallEl.value);
+      const mu = num(maxUnderstandEl.value);
+      const mh = num(maxHotsEl.value);
+      return computeLevel(r, u, h, mr, mu, mh).txt;
+    }
+    function hasMissingMarks(tr) {
+      if (!tr) return true;
+      const r = tr.querySelector(".recall")?.value?.trim();
+      const u = tr.querySelector(".understand")?.value?.trim();
+      const h = tr.querySelector(".hots")?.value?.trim();
+      return r === "" || u === "" || h === "";
+    }
+    function getRowById(rowId) {
+      if (!rowId) return null;
+      return tbody.querySelector(`tr.student-row[data-row-id="${rowId}"]`);
+    }
+    function enforceMarkLimit(inputEl, maxValue, label, options = {}) {
+      if (!inputEl) return;
+      const notify = options.notify !== false;
+      const raw = String(inputEl.value ?? "").trim();
+      if (raw === "") return;
+      let value = Number(raw);
+      if (!Number.isFinite(value)) return;
+      let changed = false;
+      if (value < 0) value = 0;
+      const safeMax = Math.max(0, Number(maxValue) || 0);
+      if (value > safeMax) {
+        value = safeMax;
+        changed = true;
+        if (notify) showQuickNotice(`لا يمكنك إدخال قيمة أكبر من ${safeMax} في ${label}`, "warn", 1900);
+      }
+      if (!Number.isInteger(value)) {
+        value = Math.floor(value);
+        changed = true;
+      }
+      const nextValue = String(value);
+      if (inputEl.value !== nextValue) {
+        inputEl.value = nextValue;
+        changed = true;
+      }
+      return changed;
+    }
+    function clampRowMarksToLimits(tr, shouldNotify = false) {
+      if (!tr) return;
+      const maxR = num(maxRecallEl.value);
+      const maxU = num(maxUnderstandEl.value);
+      const maxH = num(maxHotsEl.value);
+      const inputs = [
+        { el: tr.querySelector(".recall"), max: maxR, label: "التذكر" },
+        { el: tr.querySelector(".understand"), max: maxU, label: "الفهم" },
+        { el: tr.querySelector(".hots"), max: maxH, label: "المهارات العليا" }
+      ];
+      let exceeded = false;
+      inputs.forEach((item) => {
+        const changed = enforceMarkLimit(item.el, item.max, item.label, { notify: false });
+        if (changed) exceeded = true;
+      });
+      if (shouldNotify && exceeded) {
+        showQuickNotice("تم ضبط القيم لتطابق الحدود المسموحة", "warn", 1900);
+      }
+    }
+    function clampAllRowsToCurrentLimits(shouldNotify = false) {
+      getStudentRows().forEach((tr) => {
+        clampRowMarksToLimits(tr, false);
+        tr.querySelector(".recall")?.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      if (shouldNotify) showQuickNotice("تم تطبيق الحدود الجديدة على القيم", "info", 1700);
     }
 
     /* ── Spotlight ── */
@@ -157,21 +394,530 @@
       }, 250);
     }
 
+    /* ── Student Rows / SN / Selection ── */
+    function nextRowId() {
+      rowSeq += 1;
+      return `row-${rowSeq}`;
+    }
+    function updateRowSelectionState() {
+      getStudentRows().forEach((tr) => {
+        const isSelected = !!selectedRowId && tr.dataset.rowId === selectedRowId;
+        tr.classList.toggle("row-selected", isSelected);
+        const btn = tr.querySelector(".select-row-btn");
+        if (btn) {
+          btn.classList.toggle("active", isSelected);
+          btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        }
+      });
+    }
+    function selectRow(rowId, shouldScroll = false) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      selectedRowId = row.dataset.rowId || "";
+      updateRowSelectionState();
+      if (shouldScroll) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    function ensureSelectedRow() {
+      const selected = getRowById(selectedRowId);
+      if (selected && selected.style.display !== "none") return selected;
+      const firstVisible = getVisibleStudentRows()[0] || getStudentRows()[0] || null;
+      selectedRowId = firstVisible ? firstVisible.dataset.rowId : "";
+      updateRowSelectionState();
+      return firstVisible;
+    }
+    function sortStudentRows() {
+      const rows = getStudentRows();
+      if (rows.length < 2) return;
+      rows.sort((a, b) => {
+        const aName = getRowName(a);
+        const bName = getRowName(b);
+        if (!aName && bName) return 1;
+        if (aName && !bName) return -1;
+        return rowNameCollator.compare(aName, bName);
+      });
+      const frag = document.createDocumentFragment();
+      rows.forEach((tr) => frag.appendChild(tr));
+      tbody.appendChild(frag);
+    }
+    function applyStudentSearchFilter() {
+      const q = (studentSearchInput?.value || "").trim().toLowerCase();
+      getStudentRows().forEach((tr) => {
+        const name = getRowName(tr).toLowerCase();
+        const show = !q || name.includes(q);
+        tr.style.display = show ? "" : "none";
+      });
+    }
+    function refreshSerialNumbers() {
+      let sn = 0;
+      getStudentRows().forEach((tr) => {
+        const snEl = tr.querySelector(".row-index");
+        if (!snEl) return;
+        if (tr.style.display === "none") {
+          snEl.textContent = "";
+          return;
+        }
+        sn += 1;
+        snEl.textContent = String(sn);
+      });
+    }
+    function refreshStudentRowsView(options = {}) {
+      const { skipSort = false } = options;
+      if (!skipSort) sortStudentRows();
+      applyStudentSearchFilter();
+      refreshSerialNumbers();
+      ensureSelectedRow();
+      updateRowSelectionState();
+      syncVoiceRowAfterListChange();
+      pruneGridSelection();
+    }
+    function scheduleStudentRowsRefresh(skipSort = false) {
+      clearTimeout(rowViewTimer);
+      rowViewTimer = setTimeout(() => refreshStudentRowsView({ skipSort }), 120);
+    }
+
+    function makeGridCellKey(rowId, colKey) {
+      return `${rowId}::${colKey}`;
+    }
+    function parseGridCellKey(key) {
+      const raw = String(key || "");
+      const sep = raw.indexOf("::");
+      if (sep <= 0) return null;
+      const rowId = raw.slice(0, sep);
+      const colKey = raw.slice(sep + 2);
+      if (!rowId || !gridSelectorByCol[colKey]) return null;
+      return { rowId, colKey };
+    }
+    function getGridColKeyFromInput(input) {
+      if (!input) return "";
+      const col = input.dataset?.gridCol || "";
+      if (gridSelectorByCol[col]) return col;
+      if (input.classList.contains("studentName")) return "studentName";
+      if (input.classList.contains("recall")) return "recall";
+      if (input.classList.contains("understand")) return "understand";
+      if (input.classList.contains("hots")) return "hots";
+      if (input.classList.contains("planInput")) return "planInput";
+      return "";
+    }
+    function getGridCellInput(rowId, colKey) {
+      const row = getRowById(rowId);
+      if (!row || row.style.display === "none") return null;
+      const selector = gridSelectorByCol[colKey];
+      if (!selector) return null;
+      return row.querySelector(selector);
+    }
+    function getGridCellFromInput(input) {
+      if (!input || !input.closest) return null;
+      const tr = input.closest("tr.student-row");
+      if (!tr || tr.style.display === "none") return null;
+      const rowId = tr.dataset.rowId || "";
+      const colKey = getGridColKeyFromInput(input);
+      if (!rowId || !colKey) return null;
+      return { rowId, colKey, input, rowEl: tr };
+    }
+    function getGridCellFromTarget(target) {
+      if (!target || !target.closest) return null;
+      let input = target.closest(gridInputSelector);
+      if (!input) {
+        const td = target.closest("td");
+        if (td) input = td.querySelector(gridInputSelector);
+      }
+      return getGridCellFromInput(input);
+    }
+    function getGridCellByKey(key) {
+      const parsed = parseGridCellKey(key);
+      if (!parsed) return null;
+      const input = getGridCellInput(parsed.rowId, parsed.colKey);
+      if (!input) return null;
+      const row = input.closest("tr.student-row");
+      if (!row) return null;
+      return { rowId: parsed.rowId, colKey: parsed.colKey, input, rowEl: row };
+    }
+    function getGridCellPosition(cell) {
+      if (!cell) return null;
+      const rows = getVisibleStudentRows();
+      const rowIndex = rows.findIndex((tr) => (tr.dataset.rowId || "") === cell.rowId);
+      const colIndex = gridEditableCols.indexOf(cell.colKey);
+      if (rowIndex < 0 || colIndex < 0) return null;
+      return { rowIndex, colIndex };
+    }
+    function getGridCellByPosition(rowIndex, colIndex) {
+      const rows = getVisibleStudentRows();
+      const row = rows[rowIndex];
+      const colKey = gridEditableCols[colIndex];
+      if (!row || !colKey) return null;
+      const rowId = row.dataset.rowId || "";
+      const input = getGridCellInput(rowId, colKey);
+      if (!input) return null;
+      return { rowId, colKey, input, rowEl: row };
+    }
+    function renderGridSelection() {
+      if (!tbody) return;
+      tbody.querySelectorAll("td.grid-selected, td.grid-anchor").forEach((td) => {
+        td.classList.remove("grid-selected", "grid-anchor");
+      });
+      gridState.selectedKeys.forEach((key) => {
+        const cell = getGridCellByKey(key);
+        const td = cell?.input?.closest("td");
+        if (td) td.classList.add("grid-selected");
+      });
+      if (gridState.anchorKey) {
+        const anchor = getGridCellByKey(gridState.anchorKey);
+        const td = anchor?.input?.closest("td");
+        if (td) td.classList.add("grid-anchor");
+      }
+    }
+    function clearGridSelection(resetAnchor = true) {
+      gridState.selectedKeys.clear();
+      if (resetAnchor) gridState.anchorKey = "";
+      renderGridSelection();
+    }
+    function clearGridUndoHistory() {
+      gridState.undoStack = [];
+    }
+    function uniqueGridCells(cells) {
+      const byKey = new Map();
+      (cells || []).forEach((cell) => {
+        if (!cell?.rowId || !cell?.colKey) return;
+        const key = makeGridCellKey(cell.rowId, cell.colKey);
+        if (!byKey.has(key)) byKey.set(key, cell);
+      });
+      return [...byKey.values()];
+    }
+    function snapshotGridCells(cells) {
+      const map = new Map();
+      uniqueGridCells(cells).forEach((cell) => {
+        const key = makeGridCellKey(cell.rowId, cell.colKey);
+        map.set(key, String(cell.input?.value ?? ""));
+      });
+      return map;
+    }
+    function buildGridUndoChanges(beforeMap, afterMap) {
+      const changes = [];
+      const keys = new Set([...(beforeMap?.keys() || []), ...(afterMap?.keys() || [])]);
+      keys.forEach((key) => {
+        const prev = String(beforeMap?.get(key) ?? "");
+        const next = String(afterMap?.get(key) ?? "");
+        if (prev !== next) changes.push({ key, prev, next });
+      });
+      return changes;
+    }
+    function pushGridUndoChanges(changes) {
+      if (!Array.isArray(changes) || !changes.length) return;
+      gridState.undoStack.push({ changes });
+      if (gridState.undoStack.length > GRID_UNDO_LIMIT) gridState.undoStack.shift();
+    }
+    function undoGridLastAction() {
+      const step = gridState.undoStack.pop();
+      if (!step || !Array.isArray(step.changes) || !step.changes.length) return false;
+      const restored = [];
+      step.changes.forEach((change) => {
+        const parsed = parseGridCellKey(change.key);
+        if (!parsed) return;
+        const input = getGridCellInput(parsed.rowId, parsed.colKey);
+        if (!input) return;
+        setGridInputValue(input, parsed.colKey, change.prev);
+        restored.push({ rowId: parsed.rowId, colKey: parsed.colKey, input, rowEl: input.closest("tr.student-row") });
+      });
+      if (restored.length) {
+        setGridSelection(restored, restored[0]);
+        scheduleDraftSave();
+      }
+      return restored.length > 0;
+    }
+    function setGridSelection(cells, anchorCell = null) {
+      gridState.selectedKeys.clear();
+      (cells || []).forEach((cell) => {
+        if (!cell?.rowId || !cell?.colKey) return;
+        gridState.selectedKeys.add(makeGridCellKey(cell.rowId, cell.colKey));
+      });
+      if (anchorCell?.rowId && anchorCell?.colKey) {
+        gridState.anchorKey = makeGridCellKey(anchorCell.rowId, anchorCell.colKey);
+      } else if (!gridState.anchorKey && cells?.[0]) {
+        gridState.anchorKey = makeGridCellKey(cells[0].rowId, cells[0].colKey);
+      }
+      renderGridSelection();
+    }
+    function selectGridRange(anchorCell, targetCell) {
+      const aPos = getGridCellPosition(anchorCell);
+      const tPos = getGridCellPosition(targetCell);
+      if (!aPos || !tPos) return;
+      const minRow = Math.min(aPos.rowIndex, tPos.rowIndex);
+      const maxRow = Math.max(aPos.rowIndex, tPos.rowIndex);
+      const minCol = Math.min(aPos.colIndex, tPos.colIndex);
+      const maxCol = Math.max(aPos.colIndex, tPos.colIndex);
+      const selected = [];
+      for (let r = minRow; r <= maxRow; r += 1) {
+        for (let c = minCol; c <= maxCol; c += 1) {
+          const cell = getGridCellByPosition(r, c);
+          if (cell) selected.push(cell);
+        }
+      }
+      setGridSelection(selected, anchorCell);
+    }
+    function getGridSelectionCells() {
+      const out = [];
+      gridState.selectedKeys.forEach((key) => {
+        const cell = getGridCellByKey(key);
+        if (cell) out.push(cell);
+      });
+      return out;
+    }
+    function pruneGridSelection() {
+      const next = new Set();
+      gridState.selectedKeys.forEach((key) => {
+        const cell = getGridCellByKey(key);
+        if (cell) next.add(key);
+      });
+      gridState.selectedKeys = next;
+      if (gridState.anchorKey && !getGridCellByKey(gridState.anchorKey)) {
+        gridState.anchorKey = "";
+      }
+      renderGridSelection();
+    }
+    function getGridSelectionBounds() {
+      const cells = getGridSelectionCells();
+      if (!cells.length) return null;
+      const positions = cells.map((cell) => ({ cell, pos: getGridCellPosition(cell) })).filter((item) => !!item.pos);
+      if (!positions.length) return null;
+      let minRow = Number.POSITIVE_INFINITY;
+      let maxRow = Number.NEGATIVE_INFINITY;
+      let minCol = Number.POSITIVE_INFINITY;
+      let maxCol = Number.NEGATIVE_INFINITY;
+      positions.forEach(({ pos }) => {
+        minRow = Math.min(minRow, pos.rowIndex);
+        maxRow = Math.max(maxRow, pos.rowIndex);
+        minCol = Math.min(minCol, pos.colIndex);
+        maxCol = Math.max(maxCol, pos.colIndex);
+      });
+      return { minRow, maxRow, minCol, maxCol };
+    }
+    function getGridTopLeftSelectedCell() {
+      const bounds = getGridSelectionBounds();
+      if (!bounds) return null;
+      return getGridCellByPosition(bounds.minRow, bounds.minCol);
+    }
+    function normalizeDigits(value) {
+      return String(value || "")
+        .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776));
+    }
+    function getGridMaxForCol(colKey) {
+      if (colKey === "recall") return Math.max(0, num(maxRecallEl.value));
+      if (colKey === "understand") return Math.max(0, num(maxUnderstandEl.value));
+      if (colKey === "hots") return Math.max(0, num(maxHotsEl.value));
+      return null;
+    }
+    function setGridInputValue(input, colKey, rawValue) {
+      if (!input || !colKey) return false;
+      let nextValue = String(rawValue ?? "");
+      if (gridNumericCols.has(colKey)) {
+        const normalized = normalizeDigits(nextValue).trim();
+        if (!normalized) {
+          nextValue = "";
+        } else {
+          const numeric = Number(normalized.replace(/,/g, "."));
+          if (!Number.isFinite(numeric)) return false;
+          const max = getGridMaxForCol(colKey);
+          let safe = Math.floor(numeric);
+          if (safe < 0) safe = 0;
+          if (Number.isFinite(max)) safe = Math.min(safe, max);
+          nextValue = String(safe);
+        }
+      } else if (colKey === "planInput") {
+        nextValue = String(nextValue || "").slice(0, 30);
+      }
+      if (input.value === nextValue) return true;
+      input.value = nextValue;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    }
+    function deleteGridSelectedCells() {
+      const cells = uniqueGridCells(getGridSelectionCells());
+      if (!cells.length) return;
+      const before = snapshotGridCells(cells);
+      cells.forEach((cell) => {
+        setGridInputValue(cell.input, cell.colKey, "");
+      });
+      const after = snapshotGridCells(cells);
+      pushGridUndoChanges(buildGridUndoChanges(before, after));
+      scheduleDraftSave();
+    }
+    function gridSelectionAsTsv() {
+      const bounds = getGridSelectionBounds();
+      if (!bounds) return "";
+      const lines = [];
+      for (let r = bounds.minRow; r <= bounds.maxRow; r += 1) {
+        const values = [];
+        for (let c = bounds.minCol; c <= bounds.maxCol; c += 1) {
+          const cell = getGridCellByPosition(r, c);
+          if (!cell) {
+            values.push("");
+            continue;
+          }
+          const key = makeGridCellKey(cell.rowId, cell.colKey);
+          values.push(gridState.selectedKeys.has(key) ? String(cell.input.value ?? "") : "");
+        }
+        lines.push(values.join("\t"));
+      }
+      return lines.join("\n");
+    }
+    function parseGridClipboardText(text) {
+      const raw = String(text || "").replace(/\r/g, "");
+      if (!raw.trim()) return [];
+      const rows = raw.split("\n");
+      while (rows.length && rows[rows.length - 1] === "") rows.pop();
+      return rows.map((row) => row.split("\t"));
+    }
+    function applyGridMatrixFromCell(startCell, matrix) {
+      if (!startCell || !Array.isArray(matrix) || !matrix.length) return [];
+      const startPos = getGridCellPosition(startCell);
+      if (!startPos) return [];
+      const touched = [];
+      matrix.forEach((rowValues, rowOffset) => {
+        (rowValues || []).forEach((value, colOffset) => {
+          const cell = getGridCellByPosition(startPos.rowIndex + rowOffset, startPos.colIndex + colOffset);
+          if (!cell) return;
+          const ok = setGridInputValue(cell.input, cell.colKey, value);
+          if (ok) touched.push(cell);
+        });
+      });
+      return touched;
+    }
+    function getGridPasteTargetCells(startCell, matrix) {
+      if (!startCell || !Array.isArray(matrix) || !matrix.length) return [];
+      const startPos = getGridCellPosition(startCell);
+      if (!startPos) return [];
+      const targets = [];
+      matrix.forEach((rowValues, rowOffset) => {
+        (rowValues || []).forEach((_, colOffset) => {
+          const cell = getGridCellByPosition(startPos.rowIndex + rowOffset, startPos.colIndex + colOffset);
+          if (cell) targets.push(cell);
+        });
+      });
+      return uniqueGridCells(targets);
+    }
+    function getGridFocusCell() {
+      const active = document.activeElement;
+      return getGridCellFromInput(active);
+    }
+    function handleGridMouseDown(event) {
+      if (event.button !== 0) return;
+      const cell = getGridCellFromTarget(event.target);
+      if (!cell) return;
+      if (event.shiftKey && gridState.anchorKey) {
+        const anchor = getGridCellByKey(gridState.anchorKey);
+        if (anchor) {
+          selectGridRange(anchor, cell);
+        } else {
+          setGridSelection([cell], cell);
+        }
+      } else {
+        setGridSelection([cell], cell);
+      }
+      gridState.dragging = true;
+    }
+    function handleGridMouseOver(event) {
+      if (!gridState.dragging || !gridState.anchorKey) return;
+      const cell = getGridCellFromTarget(event.target);
+      if (!cell) return;
+      const anchor = getGridCellByKey(gridState.anchorKey);
+      if (!anchor) return;
+      selectGridRange(anchor, cell);
+    }
+    function stopGridDrag() {
+      gridState.dragging = false;
+    }
+    function handleGridDocumentMouseDown(event) {
+      if (!event.target?.closest || event.target.closest("#tbody")) return;
+      clearGridSelection(true);
+    }
+    function handleGridKeyDown(event) {
+      const key = String(event.key || "").toLowerCase();
+      const ctrlOrMeta = event.ctrlKey || event.metaKey;
+      const focusInGrid = !!document.activeElement?.closest?.("#tbody");
+      if (ctrlOrMeta && !event.shiftKey && !event.altKey && key === "z") {
+        if (gridState.undoStack.length > 0 && (focusInGrid || gridState.selectedKeys.size > 0)) {
+          event.preventDefault();
+          undoGridLastAction();
+        }
+        return;
+      }
+      const hasSelection = gridState.selectedKeys.size > 0;
+      if (!hasSelection) return;
+      if (event.key === "Delete") {
+        event.preventDefault();
+        deleteGridSelectedCells();
+      }
+    }
+    function handleGridCopy(event) {
+      if (event.defaultPrevented) return;
+      if (!gridState.selectedKeys.size) return;
+      const tsv = gridSelectionAsTsv();
+      if (!tsv) return;
+      event.preventDefault();
+      event.clipboardData?.setData("text/plain", tsv);
+    }
+    function handleGridPaste(event) {
+      if (event.defaultPrevented) return;
+      const text = event.clipboardData?.getData("text/plain") || "";
+      if (!text) return;
+      const matrix = parseGridClipboardText(text);
+      if (!matrix.length) return;
+      let startCell = getGridTopLeftSelectedCell();
+      if (!startCell) startCell = getGridFocusCell();
+      if (!startCell) return;
+      event.preventDefault();
+      let touched = [];
+      const fillAllSelected = matrix.length === 1 && (matrix[0]?.length || 0) === 1 && gridState.selectedKeys.size > 1;
+      const targetCells = fillAllSelected
+        ? uniqueGridCells(getGridSelectionCells())
+        : getGridPasteTargetCells(startCell, matrix);
+      const before = snapshotGridCells(targetCells);
+      if (fillAllSelected) {
+        const singleValue = matrix[0][0];
+        touched = getGridSelectionCells().filter((cell) => setGridInputValue(cell.input, cell.colKey, singleValue));
+      } else {
+        touched = applyGridMatrixFromCell(startCell, matrix);
+      }
+      const after = snapshotGridCells(targetCells);
+      const changes = buildGridUndoChanges(before, after);
+      if (!changes.length) return;
+      pushGridUndoChanges(changes);
+      if (!touched.length) {
+        touched = targetCells;
+      }
+      setGridSelection(uniqueGridCells(touched), touched[0]);
+      scheduleDraftSave();
+    }
+    function initGridClipboardInteractions() {
+      if (!tbody || tbody.dataset.gridInit === "1") return;
+      tbody.dataset.gridInit = "1";
+      tbody.addEventListener("mousedown", handleGridMouseDown);
+      tbody.addEventListener("mouseover", handleGridMouseOver);
+      document.addEventListener("mouseup", stopGridDrag);
+      document.addEventListener("mousedown", handleGridDocumentMouseDown);
+      document.addEventListener("keydown", handleGridKeyDown);
+      document.addEventListener("copy", handleGridCopy);
+      document.addEventListener("paste", handleGridPaste);
+    }
+
     /* ── Build Row ── */
     function makeRow(data, index) {
       const tr = document.createElement("tr");
+      tr.className = "student-row";
+      tr.dataset.rowId = data?.rowId || nextRowId();
       tr.innerHTML = `
-        <td class="row-num"><span class="row-index">${index||""}</span></td>
+        <td class="row-num"><span class="row-index">${index || ""}</span></td>
         <td class="name-cell">
-          <input type="text" class="studentName" value="${esc(data.studentName||"")}" placeholder="اسم الطالبة" />
+          <input type="text" class="studentName" data-grid-col="studentName" value="${esc(data.studentName || "")}" placeholder="اسم الطالبة" />
         </td>
-        <td class="num-cell"><input type="number" class="recall" min="0" step="1" value="${esc(data.recall??"")}"/></td>
-        <td class="num-cell"><input type="number" class="understand" min="0" step="1" value="${esc(data.understand??"")}"/></td>
-        <td class="num-cell"><input type="number" class="hots" min="0" step="1" value="${esc(data.hots??"")}"/></td>
-        <td class="total-cell"><input type="number" class="total" readonly value="${esc(data.total??0)}"/></td>
-        <td class="plan-cell"><input type="text" class="planInput" value="${esc(data.plan||"")}" placeholder="خطة علاجية (1–30 حرف)" maxlength="30"/></td>
-        <td><span class="chip level-chip">—</span></td>
-        <td><button class="danger del-btn" style="padding:6px 10px;font-size:12px;" title="حذف" aria-label="حذف">${iconMarkup("x")}</button></td>
+        <td class="num-cell"><input type="number" class="recall" data-grid-col="recall" min="0" step="1" value="${esc(data.recall ?? "")}"/></td>
+        <td class="num-cell"><input type="number" class="understand" data-grid-col="understand" min="0" step="1" value="${esc(data.understand ?? "")}"/></td>
+        <td class="num-cell"><input type="number" class="hots" data-grid-col="hots" min="0" step="1" value="${esc(data.hots ?? "")}"/></td>
+        <td class="total-cell"><input type="number" class="total" readonly value="${esc(data.total ?? 0)}"/></td>
+        <td><span class="chip estimate-chip">—</span></td>
+        <td><span class="chip skill-chip">—</span></td>
+        <td class="plan-cell"><input type="text" class="planInput" data-grid-col="planInput" value="${esc(data.plan || "")}" placeholder="خطة علاجية (1–30 حرف)" maxlength="30"/></td>
       `;
 
       const iName = tr.querySelector(".studentName");
@@ -179,108 +925,169 @@
       const iUnder = tr.querySelector(".understand");
       const iHots = tr.querySelector(".hots");
       const iTotal = tr.querySelector(".total");
-      const iPlan  = tr.querySelector(".planInput");
-      const chipLvl= tr.querySelector(".level-chip");
-      const btnDel = tr.querySelector(".del-btn");
+      const iPlan = tr.querySelector(".planInput");
+      const chipEstimate = tr.querySelector(".estimate-chip");
+      const chipSkill = tr.querySelector(".skill-chip");
 
-      function getRowIndex() {
-        return [...tbody.querySelectorAll("tr")].indexOf(tr)+1;
+      function getRowSn() {
+        const txt = (tr.querySelector(".row-index")?.textContent || "").trim();
+        if (txt) return txt;
+        const all = getVisibleStudentRows();
+        const idx = all.indexOf(tr);
+        return idx >= 0 ? String(idx + 1) : "—";
       }
 
       function recompute() {
-        const r=num(iRecall.value), u=num(iUnder.value), h=num(iHots.value);
-        iTotal.value = r+u+h;
-        const mr=num(maxRecallEl.value), mu=num(maxUnderstandEl.value), mh=num(maxHotsEl.value);
-        const L=computeLevel(r,u,h,mr,mu,mh);
-        chipLvl.textContent=L.txt; chipLvl.className="chip level-chip"+(L.cls?" "+L.cls:"");
-        const bad = r>mr||u>mu||h>mh;
+        enforceMarkLimit(iRecall, num(maxRecallEl.value), "التذكر", { notify: false });
+        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم", { notify: false });
+        enforceMarkLimit(iHots, num(maxHotsEl.value), "المهارات العليا", { notify: false });
+        const r = num(iRecall.value), u = num(iUnder.value), h = num(iHots.value);
+        iTotal.value = r + u + h;
+        const mr = num(maxRecallEl.value), mu = num(maxUnderstandEl.value), mh = num(maxHotsEl.value);
+        const estimate = computeEstimate(r + u + h, mr + mu + mh);
+        chipEstimate.textContent = estimate.txt;
+        chipEstimate.className = "chip estimate-chip" + (estimate.cls ? " " + estimate.cls : "");
+        const skillScale = computeSkillScale(r, u, h, mr, mu, mh);
+        chipSkill.textContent = formatSkillScale(skillScale);
+        chipSkill.className = "chip skill-chip" + (skillScale.cls ? " " + skillScale.cls : "");
+        const L = computeLevel(r, u, h, mr, mu, mh);
+        tr.dataset.levelText = L.txt;
+        const bad = r > mr || u > mu || h > mh;
         tr.classList.toggle("invalid-row", bad);
         updateValidationChip();
       }
 
       function onFocus() {
         tr.classList.add("row-active");
-        showSpotlight(iName.value, getRowIndex());
+        selectRow(tr.dataset.rowId || "");
+        if (voiceState.isOpen) setVoiceActiveRowById(tr.dataset.rowId || "", false);
+        showSpotlight(iName.value, getRowSn());
       }
       function onBlur() {
         tr.classList.remove("row-active");
         hideSpotlight();
       }
 
-      iName.addEventListener("input", ()=>{ scheduleDraftSave(); recompute(); if(spotlight.classList.contains("visible")) showSpotlight(iName.value, getRowIndex()); });
-      iRecall.addEventListener("input", ()=>{ recompute(); scheduleDraftSave(); });
-      iUnder.addEventListener("input", ()=>{ recompute(); scheduleDraftSave(); });
-      iHots.addEventListener("input", ()=>{ recompute(); scheduleDraftSave(); });
-      iPlan.addEventListener("input", ()=>scheduleDraftSave());
+      iName.addEventListener("input", () => {
+        scheduleDraftSave();
+        recompute();
+        scheduleStudentRowsRefresh();
+        if (spotlight.classList.contains("visible")) showSpotlight(iName.value, getRowSn());
+      });
+      iRecall.addEventListener("input", () => {
+        enforceMarkLimit(iRecall, num(maxRecallEl.value), "التذكر");
+        recompute();
+        scheduleDraftSave();
+      });
+      iUnder.addEventListener("input", () => {
+        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم");
+        recompute();
+        scheduleDraftSave();
+      });
+      iHots.addEventListener("input", () => {
+        enforceMarkLimit(iHots, num(maxHotsEl.value), "المهارات العليا");
+        recompute();
+        scheduleDraftSave();
+      });
+      iPlan.addEventListener("input", () => scheduleDraftSave());
 
-      [iName, iRecall, iUnder, iHots, iPlan].forEach(inp => {
+      [iName, iRecall, iUnder, iHots, iPlan].forEach((inp) => {
         inp.addEventListener("focus", onFocus);
         inp.addEventListener("blur", onBlur);
       });
 
-      btnDel.addEventListener("click", ()=>{ tr.remove(); reindexRows(); updateValidationChip(); updateAutoFillButtonState(); scheduleDraftSave(); });
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("button")) return;
+        selectRow(tr.dataset.rowId || "");
+        if (voiceState.isOpen) setVoiceActiveRowById(tr.dataset.rowId || "", false);
+      });
 
       recompute();
       return tr;
     }
 
     function reindexRows() {
-      [...tbody.querySelectorAll("tr")].forEach((tr,i) => {
-        const s = tr.querySelector(".row-index");
-        if(s) s.textContent = i+1;
-      });
+      refreshSerialNumbers();
     }
 
     function setRows(names) {
-      tbody.innerHTML="";
-      names.forEach((n,i) => tbody.appendChild(makeRow({studentName:n,recall:"",understand:"",hots:"",total:"",plan:""}, i+1)));
+      tbody.innerHTML = "";
+      const sortedNames = [...(names || [])].sort((a, b) => rowNameCollator.compare(String(a || ""), String(b || "")));
+      sortedNames.forEach((n, i) =>
+        tbody.appendChild(makeRow({ studentName: n, recall: "", understand: "", hots: "", total: "", plan: "" }, i + 1))
+      );
       renderLucideIcons();
       tableContext = { grade: gradeSel.value.trim(), section: sectionSel.value.trim() };
+      selectedRowId = "";
+      voiceState.undoStack = [];
+      voiceState.buffer = [];
+      clearGridUndoHistory();
+      clearGridSelection(true);
+      refreshStudentRowsView({ skipSort: true });
       updateValidationChip();
       updateAutoFillButtonState();
       scheduleDraftSave();
     }
 
     function clearScoresOnly() {
-      [...tbody.querySelectorAll("tr")].forEach(tr => {
-        tr.querySelector(".recall").value="";
-        tr.querySelector(".understand").value="";
-        tr.querySelector(".hots").value="";
-        tr.querySelector(".total").value="0";
-        tr.querySelector(".planInput").value="";
-        const c=tr.querySelector(".level-chip"); c.textContent="—"; c.className="chip level-chip";
-        tr.classList.remove("invalid-row","row-active");
+      getStudentRows().forEach((tr) => {
+        tr.querySelector(".recall").value = "";
+        tr.querySelector(".understand").value = "";
+        tr.querySelector(".hots").value = "";
+        tr.querySelector(".total").value = "0";
+        tr.querySelector(".planInput").value = "";
+        tr.dataset.levelText = "—";
+        const estimateChip = tr.querySelector(".estimate-chip");
+        if (estimateChip) {
+          estimateChip.textContent = "—";
+          estimateChip.className = "chip estimate-chip";
+        }
+        const skillChip = tr.querySelector(".skill-chip");
+        if (skillChip) {
+          skillChip.textContent = "—";
+          skillChip.className = "chip skill-chip";
+        }
+        tr.classList.remove("invalid-row", "row-active", "voice-active");
       });
+      clearGridUndoHistory();
       updateValidationChip();
+      refreshStudentRowsView({ skipSort: true });
       scheduleDraftSave();
     }
 
     function validateAllRows() {
-      [...tbody.querySelectorAll("tr")].forEach(tr => tr.querySelector(".recall").dispatchEvent(new Event("input",{bubbles:true})));
+      getStudentRows().forEach((tr) => tr.querySelector(".recall").dispatchEvent(new Event("input", { bubbles: true })));
     }
 
     function updateValidationChip() {
-      const mr=num(maxRecallEl.value), mu=num(maxUnderstandEl.value), mh=num(maxHotsEl.value);
-      const trs=[...tbody.querySelectorAll("tr")];
-      let any=false, bad=0;
-      for(const tr of trs) {
-        const n=tr.querySelector(".studentName").value.trim();
-        if(!n) continue; any=true;
-        const r=num(tr.querySelector(".recall").value), u=num(tr.querySelector(".understand").value), h=num(tr.querySelector(".hots").value);
-        if(r>mr||u>mu||h>mh) bad++;
+      const mr = num(maxRecallEl.value), mu = num(maxUnderstandEl.value), mh = num(maxHotsEl.value);
+      const trs = getStudentRows();
+      let any = false, bad = 0;
+      for (const tr of trs) {
+        const n = getRowName(tr);
+        if (!n) continue;
+        any = true;
+        const r = num(tr.querySelector(".recall").value);
+        const u = num(tr.querySelector(".understand").value);
+        const h = num(tr.querySelector(".hots").value);
+        if (r > mr || u > mu || h > mh) bad++;
       }
-      if(!any) { validChip.textContent="التحقق: لا توجد بيانات"; validChip.className="chip"; return; }
-      if(bad===0) {
+      if (!any) {
+        validChip.textContent = "التحقق: لا توجد بيانات";
+        validChip.className = "chip";
+        return;
+      }
+      if (bad === 0) {
         validChip.innerHTML = `${iconMarkup("circle-check-big")}<span>جميع الدرجات ضمن الحدود</span>`;
-        validChip.className="chip ok";
+        validChip.className = "chip ok";
       } else {
         validChip.innerHTML = `${iconMarkup("circle-x")}<span>يوجد ${bad} سطر خارج الحدود</span>`;
-        validChip.className="chip bad";
+        validChip.className = "chip bad";
       }
       renderLucideIcons();
     }
     function hasTableRows() {
-      return tbody && tbody.querySelectorAll("tr").length > 0;
+      return getStudentRows().length > 0;
     }
     function updateAutoFillButtonState() {
       const btn = $("btnAutoFill");
@@ -412,7 +1219,7 @@
       }
     }
     function checkIncomplete() {
-      return [...tbody.querySelectorAll("tr")].filter(tr => {
+      return getStudentRows().filter(tr => {
         const n=tr.querySelector(".studentName").value.trim();
         if(!n) return false;
         const r=tr.querySelector(".recall").value.trim();
@@ -444,7 +1251,7 @@
 
       const rows=[];
       const {maxRecall:mr,maxUnderstand:mu,maxHots:mh}=header;
-      for(const tr of tbody.querySelectorAll("tr")) {
+      for(const tr of getStudentRows()) {
         const n=tr.querySelector(".studentName").value.trim(); if(!n) continue;
         let r=tr.querySelector(".recall").value.trim();
         let u=tr.querySelector(".understand").value.trim();
@@ -457,8 +1264,8 @@
         if(un>mu) throw new Error(`تجاوز حد الفهم: ${n}`);
         if(hn>mh) throw new Error(`تجاوز حد المهارات: ${n}`);
         const L=computeLevel(rn,un,hn,mr,mu,mh);
-        if(!fillEmpty&&L.txt==="ضعيف"&&(plan.length<1||plan.length>30))
-          throw new Error(`الطالبة "${n}" — ضعيف، يجب إدخال خطة علاجية (1–30 حرف)`);
+        if(!fillEmpty&&isWeakLevel(L.txt)&&(plan.length<1||plan.length>30))
+          throw new Error(`الطالبة "${n}" — ${L.txt}، يجب إدخال خطة علاجية (1–30 حرف)`);
         rows.push({studentName:n,recall:rn,understand:un,hots:hn,plan});
       }
       if(rows.length===0) throw new Error("لا توجد طالبات للإرسال.");
@@ -501,7 +1308,8 @@
           maxRecall:maxRecallEl.value,maxUnderstand:maxUnderstandEl.value,maxHots:maxHotsEl.value,
           totalMax: totalMaxEl.value
         },
-        rows:[...tbody.querySelectorAll("tr")].map(tr=>({
+        rows:getStudentRows().map(tr=>({
+          rowId: tr.dataset.rowId || nextRowId(),
           studentName:tr.querySelector(".studentName").value,
           recall:tr.querySelector(".recall").value,
           understand:tr.querySelector(".understand").value,
@@ -523,6 +1331,12 @@
       (st.rows||[]).forEach((r,i)=>tbody.appendChild(makeRow(r,i+1)));
       renderLucideIcons();
       tableContext = { grade: h.grade || "", section: h.section || "" };
+      selectedRowId = "";
+      voiceState.undoStack = [];
+      voiceState.buffer = [];
+      clearGridUndoHistory();
+      clearGridSelection(true);
+      refreshStudentRowsView();
       updateValidationChip();
       updateAutoFillButtonState();
       if(st.lastBatch) lastBatch.textContent=st.lastBatch;
@@ -551,7 +1365,12 @@
       maxHotsEl.value = DEFAULT_MAX_HOTS;
       computeTotalMax();
       tbody.innerHTML = "";
+      selectedRowId = "";
+      voiceState.activeRowId = "";
       tableContext = { grade: "", section: "" };
+      clearGridUndoHistory();
+      clearGridSelection(true);
+      refreshStudentRowsView({ skipSort: true });
       updateValidationChip();
       updateAutoFillButtonState();
       lastBatch.textContent = "—";
@@ -559,6 +1378,946 @@
       if (shouldReload) {
         setTimeout(() => window.location.reload(), 150);
       }
+    }
+
+    /* ── Voice Entry ── */
+    const voiceNumberMap = {
+      "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+      zero: 0, oh: 0, o: 0,
+      one: 1,
+      two: 2, to: 2, too: 2,
+      three: 3,
+      four: 4, for: 4,
+      five: 5,
+      six: 6,
+      seven: 7,
+      eight: 8, ate: 8,
+      nine: 9,
+      ten: 10,
+      صفر: 0, زيرو: 0,
+      واحد: 1, واحده: 1, اول: 1, ون: 1,
+      اثنين: 2, اثنان: 2, اتنين: 2, تنين: 2, ثنين: 2, تو: 2,
+      ثلاثه: 3, ثلاث: 3, تلاته: 3, ثري: 3,
+      اربعه: 4, اربع: 4, فور: 4, فق: 4, فوك: 4, فوق: 4,
+      خمسه: 5, خمس: 5, فايف: 5,
+      سته: 6, ست: 6, سكس: 6,
+      سبعه: 7, سبع: 7, سيفن: 7,
+      ثمانيه: 8, ثماني: 8, ثمان: 8, ايت: 8,
+      تسعه: 9, تسع: 9, ناين: 9,
+      عشره: 10, عشر: 10
+    };
+    const voiceCommandMap = {
+      next: "next",
+      "نكست": "next",
+      "نيكست": "next",
+      "التالي": "next",
+      "التاليه": "next",
+      "بعده": "next"
+    };
+    function normalizeVoiceText(value) {
+      return String(value || "")
+        .toLowerCase()
+        .normalize("NFKC")
+        .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
+        .replace(/[إأآٱ]/g, "ا")
+        .replace(/ى/g, "ي")
+        .replace(/ة/g, "ه")
+        .replace(/ؤ/g, "و")
+        .replace(/ئ/g, "ي")
+        .replace(/[\u064B-\u065F\u0670]/g, "")
+        .trim();
+    }
+    function speakStudentName(studentName) {
+      if (!supportsSpeechSynthesis) return;
+      const text = String(studentName || "").trim();
+      if (!text) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new window.SpeechSynthesisUtterance(text);
+        utterance.lang = "ar-SA";
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+        window.speechSynthesis.speak(utterance);
+      } catch (_) {}
+    }
+
+    function updateVoicePanelInfo() {
+      if (!voiceCurrentSn || !voiceCurrentStudent || !voiceListeningStatus || !voiceTokensPreview) return;
+      const row = getRowById(voiceState.activeRowId);
+      const rowSn = (row?.querySelector(".row-index")?.textContent || "").trim();
+      const studentName = row ? getRowName(row) : "";
+      const recognitionSupported = Boolean(SpeechRecognitionCtor);
+      const canStart = recognitionSupported && !voiceState.listening;
+      const canStop = recognitionSupported && voiceState.listening;
+      const canUndo = voiceState.undoStack.length > 0;
+      voiceCurrentSn.textContent = rowSn || "—";
+      if (voiceSnInput && document.activeElement !== voiceSnInput) {
+        voiceSnInput.value = rowSn || "";
+      }
+      voiceCurrentStudent.textContent = studentName || "—";
+      if (voiceState.listening) {
+        voiceListeningStatus.textContent = "يستمع الآن";
+        voiceListeningStatus.className = "voice-value listening";
+      } else {
+        voiceListeningStatus.textContent = SpeechRecognitionCtor ? "متوقف" : "غير مدعوم";
+        voiceListeningStatus.className = "voice-value";
+      }
+      const rv = voiceState.buffer.length > 0 ? String(voiceState.buffer[0]) : "—";
+      const uv = voiceState.buffer.length > 1 ? String(voiceState.buffer[1]) : "—";
+      const hv = voiceState.buffer.length > 2 ? String(voiceState.buffer[2]) : "—";
+      if (voiceRecallVal) voiceRecallVal.textContent = rv;
+      if (voiceUnderstandVal) voiceUnderstandVal.textContent = uv;
+      if (voiceHotsVal) voiceHotsVal.textContent = hv;
+      const finalTokens = voiceState.tokenPreview.slice(-10).join(" ");
+      const interimTokens = voiceState.interimTokens.join(" ");
+      const preview = [finalTokens, interimTokens].filter(Boolean).join(" | ");
+      voiceTokensPreview.textContent = preview || "—";
+      if (voiceStartBtn) {
+        voiceStartBtn.disabled = !canStart;
+        voiceStartBtn.classList.toggle("voice-btn-active", canStart);
+        voiceStartBtn.classList.toggle("voice-btn-idle", !canStart);
+        voiceStartBtn.classList.toggle("voice-btn-disabled", !canStart);
+      }
+      if (voiceStopBtn) {
+        voiceStopBtn.disabled = !canStop;
+        voiceStopBtn.classList.toggle("voice-btn-active", canStop);
+        voiceStopBtn.classList.toggle("voice-btn-idle", !canStop);
+        voiceStopBtn.classList.toggle("voice-btn-disabled", !canStop);
+      }
+      if (voiceUndoBtn) {
+        voiceUndoBtn.disabled = !canUndo;
+        voiceUndoBtn.classList.toggle("voice-btn-active", canUndo);
+        voiceUndoBtn.classList.toggle("voice-btn-idle", !canUndo);
+        voiceUndoBtn.classList.toggle("voice-btn-disabled", !canUndo);
+      }
+    }
+
+    function setVoiceActiveRowById(rowId, shouldScroll = true) {
+      if (!voiceState.isOpen) {
+        getStudentRows().forEach((tr) => tr.classList.remove("voice-active"));
+        return;
+      }
+      const visibleRows = getVisibleStudentRows();
+      if (!visibleRows.length) {
+        voiceState.activeRowId = "";
+        getStudentRows().forEach((tr) => tr.classList.remove("voice-active"));
+        updateVoicePanelInfo();
+        return;
+      }
+      let row = getRowById(rowId);
+      if (!row || row.style.display === "none") {
+        row = ensureSelectedRow();
+        if (!row || row.style.display === "none") row = visibleRows[0];
+      }
+      if (!row) {
+        updateVoicePanelInfo();
+        return;
+      }
+      voiceState.activeRowId = row.dataset.rowId || "";
+      selectRow(voiceState.activeRowId);
+      getStudentRows().forEach((tr) => tr.classList.toggle("voice-active", tr === row));
+      if (shouldScroll) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      updateVoicePanelInfo();
+    }
+    function setVoiceActiveBySn(snValue, shouldScroll = true, shouldSpeakName = false) {
+      const sn = Number(snValue);
+      const rows = getVisibleStudentRows();
+      if (!Number.isInteger(sn) || sn < 1 || sn > rows.length) {
+        if (rows.length > 0) showQuickNotice(`SN يجب أن يكون بين 1 و ${rows.length}`, "warn", 1700);
+        return;
+      }
+      const target = rows[sn - 1];
+      if (!target) return;
+      setVoiceActiveRowById(target.dataset.rowId || "", shouldScroll);
+      if (shouldSpeakName) speakStudentName(getRowName(target));
+    }
+
+    function syncVoiceRowAfterListChange() {
+      if (!voiceState.isOpen) {
+        getStudentRows().forEach((tr) => tr.classList.remove("voice-active"));
+        return;
+      }
+      const visibleRows = getVisibleStudentRows();
+      if (!visibleRows.length) {
+        voiceState.activeRowId = "";
+        getStudentRows().forEach((tr) => tr.classList.remove("voice-active"));
+        updateVoicePanelInfo();
+        return;
+      }
+      const current = getRowById(voiceState.activeRowId);
+      if (!current || current.style.display === "none") {
+        const selected = ensureSelectedRow();
+        const next = selected && selected.style.display !== "none" ? selected : visibleRows[0];
+        voiceState.activeRowId = next ? next.dataset.rowId : "";
+      }
+      setVoiceActiveRowById(voiceState.activeRowId, false);
+    }
+
+    function pushVoiceTokenPreview(token) {
+      if (!token) return;
+      voiceState.tokenPreview.push(token);
+      if (voiceState.tokenPreview.length > 28) {
+        voiceState.tokenPreview = voiceState.tokenPreview.slice(-28);
+      }
+    }
+
+    function normalizeVoiceToken(token) {
+      const value = normalizeVoiceText(token);
+      if (!value) return null;
+      if (voiceCommandMap[value]) return voiceCommandMap[value];
+      if (value.includes("next") || value.includes("نكست") || value.includes("نيكست")) return "next";
+      if (/^\d+$/.test(value)) {
+        if (value.length > 1 && value !== "10") return value.split("");
+        const numericValue = Number(value);
+        if (Number.isInteger(numericValue) && numericValue >= 0 && numericValue <= 10) {
+          return String(numericValue);
+        }
+      }
+      const numeric = Object.prototype.hasOwnProperty.call(voiceNumberMap, value)
+        ? voiceNumberMap[value]
+        : null;
+      if (numeric === null || numeric === undefined) return null;
+      return String(numeric);
+    }
+
+    function filterAcceptedVoiceTokens(tokens) {
+      return (tokens || []).flatMap((token) => {
+        const normalized = normalizeVoiceToken(token);
+        if (!normalized) return [];
+        return Array.isArray(normalized) ? normalized : [normalized];
+      });
+    }
+
+    function tokenizeVoice(text) {
+      return normalizeVoiceText(text)
+        .replace(/[^a-z0-9\u0600-\u06FF\s]/g, " ")
+        .replace(/([0-9]+)([a-z\u0600-\u06FF]+)/g, "$1 $2")
+        .replace(/([a-z\u0600-\u06FF]+)([0-9]+)/g, "$1 $2")
+        .split(/\s+/)
+        .filter(Boolean);
+    }
+
+    function resetVoiceBufferedMarks() {
+      clearTimeout(voiceState.repeatFillTimer);
+      voiceState.repeatFillTimer = null;
+      voiceState.buffer = [];
+      voiceState.tokenPreview = [];
+      voiceState.interimTokens = [];
+      voiceState.lastOverflowNoticeAt = 0;
+    }
+
+    function scheduleRepeatThirdFill() {
+      clearTimeout(voiceState.repeatFillTimer);
+      voiceState.repeatFillTimer = null;
+      if (voiceState.buffer.length !== 2) return;
+      if (voiceState.buffer[0] !== voiceState.buffer[1]) return;
+      const repeated = Number(voiceState.buffer[1]);
+      if (!Number.isFinite(repeated)) return;
+      voiceState.repeatFillTimer = setTimeout(() => {
+        voiceState.repeatFillTimer = null;
+        if (voiceState.buffer.length !== 2) return;
+        if (voiceState.buffer[0] !== voiceState.buffer[1]) return;
+        voiceState.buffer.push(repeated);
+        showQuickNotice(`تم إكمال الدرجة الثالثة تلقائيًا بنفس القيمة (${repeated})`, "info", 1500);
+        updateVoicePanelInfo();
+      }, 1200);
+    }
+
+    function notifyVoiceRejected(message) {
+      resetVoiceBufferedMarks();
+      showQuickNotice(message, "bad", 3400, { requireAck: true });
+      if (voiceListeningStatus) {
+        voiceListeningStatus.textContent = "لم يتم قبول القيم";
+        voiceListeningStatus.className = "voice-value";
+      }
+      updateVoicePanelInfo();
+    }
+
+    function applyVoiceMarksToRow(row, values) {
+      if (!row || !Array.isArray(values) || values.length !== 3) return false;
+      const rInput = row.querySelector(".recall");
+      const uInput = row.querySelector(".understand");
+      const hInput = row.querySelector(".hots");
+      const maxR = num(maxRecallEl.value);
+      const maxU = num(maxUnderstandEl.value);
+      const maxH = num(maxHotsEl.value);
+      const numericValues = [
+        Math.max(0, Number(values[0]) || 0),
+        Math.max(0, Number(values[1]) || 0),
+        Math.max(0, Number(values[2]) || 0)
+      ];
+      if (numericValues[0] > maxR) {
+        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة التذكر (${numericValues[0]}) تجاوزت الحد المسموح ${maxR}`);
+        return false;
+      }
+      if (numericValues[1] > maxU) {
+        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة الفهم (${numericValues[1]}) تجاوزت الحد المسموح ${maxU}`);
+        return false;
+      }
+      if (numericValues[2] > maxH) {
+        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة المهارات العليا (${numericValues[2]}) تجاوزت الحد المسموح ${maxH}`);
+        return false;
+      }
+      const prev = {
+        recall: rInput?.value ?? "",
+        understand: uInput?.value ?? "",
+        hots: hInput?.value ?? ""
+      };
+      if (rInput) rInput.value = String(numericValues[0]);
+      if (uInput) uInput.value = String(numericValues[1]);
+      if (hInput) hInput.value = String(numericValues[2]);
+      if (rInput) rInput.dispatchEvent(new Event("input", { bubbles: true }));
+      if (uInput) uInput.dispatchEvent(new Event("input", { bubbles: true }));
+      if (hInput) hInput.dispatchEvent(new Event("input", { bubbles: true }));
+      voiceState.undoStack.push({
+        rowId: row.dataset.rowId || "",
+        prev,
+        next: { recall: String(numericValues[0]), understand: String(numericValues[1]), hots: String(numericValues[2]) }
+      });
+      if (voiceState.undoStack.length > 500) voiceState.undoStack.shift();
+      scheduleDraftSave();
+      return true;
+    }
+
+    function moveVoiceToNextRow() {
+      const rows = getVisibleStudentRows();
+      if (!rows.length) return;
+      const current = getRowById(voiceState.activeRowId);
+      const idx = rows.indexOf(current);
+      if (idx >= 0 && idx < rows.length - 1) {
+        setVoiceActiveRowById(rows[idx + 1].dataset.rowId, true);
+        return;
+      }
+      if (idx === -1) {
+        setVoiceActiveRowById(rows[0].dataset.rowId, true);
+        return;
+      }
+      setVoiceActiveRowById(rows[rows.length - 1].dataset.rowId, true);
+      showQuickNotice("تم الوصول إلى آخر طالبة", "warn", 1800);
+    }
+
+    function commitVoiceBufferedMarks() {
+      clearTimeout(voiceState.repeatFillTimer);
+      voiceState.repeatFillTimer = null;
+      if (voiceState.buffer.length === 2 && voiceState.buffer[0] === voiceState.buffer[1]) {
+        const repeated = Number(voiceState.buffer[1]);
+        if (Number.isFinite(repeated)) {
+          voiceState.buffer.push(repeated);
+          showQuickNotice(`تم إكمال الدرجة الثالثة تلقائيًا بنفس القيمة (${repeated})`, "info", 1500);
+        }
+      }
+      if (voiceState.buffer.length !== 3) {
+        if (voiceState.buffer.length > 0) {
+          resetVoiceBufferedMarks();
+          showQuickNotice("لم تكتمل 3 درجات. تم مسح القيم المسموعة، أعد الإدخال ثم قل next", "warn", 2600);
+        } else {
+          resetVoiceBufferedMarks();
+          showQuickNotice("يجب إدخال 3 درجات ثم كلمة next", "warn", 1900);
+        }
+        updateVoicePanelInfo();
+        return;
+      }
+      const row = getRowById(voiceState.activeRowId) || ensureSelectedRow();
+      if (!row) {
+        showQuickNotice("لا توجد طالبات مرئية للإدخال الصوتي", "warn", 1900);
+        resetVoiceBufferedMarks();
+        updateVoicePanelInfo();
+        return;
+      }
+      const committed = applyVoiceMarksToRow(row, voiceState.buffer);
+      resetVoiceBufferedMarks();
+      if (!committed) {
+        updateVoicePanelInfo();
+        return;
+      }
+      moveVoiceToNextRow();
+      updateVoicePanelInfo();
+    }
+
+    function undoVoiceLastRow() {
+      const last = voiceState.undoStack.pop();
+      if (!last) {
+        showQuickNotice("لا يوجد سجل للتراجع", "warn", 1800);
+        return;
+      }
+      const row = getRowById(last.rowId);
+      if (!row) {
+        showQuickNotice("تعذر تنفيذ التراجع للصف السابق", "warn", 1800);
+        return;
+      }
+      const rInput = row.querySelector(".recall");
+      const uInput = row.querySelector(".understand");
+      const hInput = row.querySelector(".hots");
+      if (rInput) rInput.value = last.prev.recall ?? "";
+      if (uInput) uInput.value = last.prev.understand ?? "";
+      if (hInput) hInput.value = last.prev.hots ?? "";
+      if (rInput) rInput.dispatchEvent(new Event("input", { bubbles: true }));
+      if (uInput) uInput.dispatchEvent(new Event("input", { bubbles: true }));
+      if (hInput) hInput.dispatchEvent(new Event("input", { bubbles: true }));
+      voiceState.buffer = [];
+      setVoiceActiveRowById(last.rowId, true);
+      scheduleDraftSave();
+      showQuickNotice("تم التراجع عن آخر صف صوتي", "info", 1700);
+    }
+
+    function consumeVoiceToken(token) {
+      const normalized = normalizeVoiceToken(token);
+      if (!normalized) return;
+      if (Array.isArray(normalized)) {
+        normalized.forEach((item) => consumeVoiceToken(item));
+        return;
+      }
+      if (normalized === "next") {
+        clearTimeout(voiceState.repeatFillTimer);
+        voiceState.repeatFillTimer = null;
+        pushVoiceTokenPreview(normalized);
+        if (voiceState.buffer.length === 0) {
+          moveVoiceToNextRow();
+          updateVoicePanelInfo();
+          return;
+        }
+        commitVoiceBufferedMarks();
+        return;
+      }
+      const numeric = Number(normalized);
+      if (!Number.isFinite(numeric)) return;
+      if (voiceState.buffer.length >= 3) {
+        clearTimeout(voiceState.repeatFillTimer);
+        voiceState.repeatFillTimer = null;
+        const now = Date.now();
+        if (!voiceState.lastOverflowNoticeAt || now - voiceState.lastOverflowNoticeAt > 1800) {
+          showQuickNotice("تم تجاهل قيمة إضافية. قل next لاعتماد الدرجات الحالية", "warn", 1800);
+          voiceState.lastOverflowNoticeAt = now;
+        }
+        pushVoiceTokenPreview(String(numeric));
+        updateVoicePanelInfo();
+        return;
+      }
+      pushVoiceTokenPreview(String(numeric));
+      voiceState.buffer.push(numeric);
+      scheduleRepeatThirdFill();
+      updateVoicePanelInfo();
+    }
+
+    function processVoiceTranscript(transcript) {
+      const tokens = filterAcceptedVoiceTokens(tokenizeVoice(transcript));
+      if (!tokens.length) return;
+      tokens.forEach((token) => consumeVoiceToken(token));
+      updateVoicePanelInfo();
+    }
+
+    function buildVoiceRecognition() {
+      if (!SpeechRecognitionCtor) return null;
+      const rec = new SpeechRecognitionCtor();
+      rec.lang = "ar-SA";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 1;
+      rec.onstart = () => {
+        voiceState.listening = true;
+        voiceState.lastProcessedResultIndex = 0;
+        updateVoicePanelInfo();
+      };
+      rec.onresult = (event) => {
+        const interim = [];
+        const startIndex = Math.max(event.resultIndex || 0, voiceState.lastProcessedResultIndex || 0);
+        for (let i = startIndex; i < event.results.length; i += 1) {
+          const part = event.results[i][0]?.transcript || "";
+          if (!part) continue;
+          if (event.results[i].isFinal) {
+            processVoiceTranscript(part);
+            voiceState.lastProcessedResultIndex = i + 1;
+          } else {
+            interim.push(...filterAcceptedVoiceTokens(tokenizeVoice(part)).slice(-6));
+          }
+        }
+        voiceState.interimTokens = interim.slice(-6);
+        updateVoicePanelInfo();
+      };
+      rec.onerror = (event) => {
+        const err = event?.error || "";
+        if (err === "not-allowed" || err === "service-not-allowed") {
+          voiceState.shouldKeepListening = false;
+          voiceState.listening = false;
+          showQuickNotice("لا يوجد إذن لاستخدام الميكروفون", "bad", 2600);
+          updateVoicePanelInfo();
+          return;
+        }
+        if (err === "aborted") return;
+        if (err === "no-speech" || err === "audio-capture") {
+          updateVoicePanelInfo();
+          return;
+        }
+        showQuickNotice("تم تجاهل نتيجة صوتية غير واضحة", "warn", 1600);
+      };
+      rec.onend = () => {
+        voiceState.listening = false;
+        voiceState.interimTokens = [];
+        voiceState.lastProcessedResultIndex = 0;
+        updateVoicePanelInfo();
+        if (!voiceState.shouldKeepListening || !voiceState.isOpen) return;
+        clearTimeout(voiceState.restartTimer);
+        voiceState.restartTimer = setTimeout(() => {
+          try { rec.start(); } catch (_) {}
+        }, 320);
+      };
+      return rec;
+    }
+
+    function startVoiceRecognition() {
+      if (!SpeechRecognitionCtor) {
+        showQuickNotice("المتصفح الحالي لا يدعم الإدخال الصوتي", "warn", 2600);
+        updateVoicePanelInfo();
+        return;
+      }
+      if (!voiceState.isOpen && voicePanel) {
+        voicePanel.classList.add("visible");
+        voiceState.isOpen = true;
+      }
+      if (!voiceState.recognition) voiceState.recognition = buildVoiceRecognition();
+      if (!voiceState.recognition) return;
+      voiceState.shouldKeepListening = true;
+      syncVoiceRowAfterListChange();
+      try {
+        voiceState.recognition.start();
+      } catch (_) {
+        if (!voiceState.listening) {
+          clearTimeout(voiceState.restartTimer);
+          voiceState.restartTimer = setTimeout(() => {
+            try { voiceState.recognition.start(); } catch (_) {}
+          }, 240);
+        }
+      }
+      updateVoicePanelInfo();
+    }
+
+    function stopVoiceRecognition(showMessage = false) {
+      voiceState.shouldKeepListening = false;
+      voiceState.interimTokens = [];
+      voiceState.lastProcessedResultIndex = 0;
+      clearTimeout(voiceState.repeatFillTimer);
+      voiceState.repeatFillTimer = null;
+      clearTimeout(voiceState.restartTimer);
+      if (voiceState.recognition) {
+        try { voiceState.recognition.stop(); } catch (_) {}
+      }
+      voiceState.listening = false;
+      updateVoicePanelInfo();
+      if (showMessage) showQuickNotice("تم إيقاف الإدخال الصوتي", "info", 1700);
+    }
+
+    function openVoicePanel() {
+      if (!voicePanel) return;
+      voicePanel.classList.add("visible");
+      voiceState.isOpen = true;
+      if (!SpeechRecognitionCtor) {
+        showQuickNotice("المتصفح الحالي لا يدعم الإدخال الصوتي", "warn", 2600);
+      }
+      syncVoiceRowAfterListChange();
+      updateVoicePanelInfo();
+      clampVoicePanelToViewport();
+    }
+
+    function closeVoicePanel() {
+      stopVoiceRecognition(false);
+      clearTimeout(voiceSnInputTimer);
+      voiceState.isOpen = false;
+      clearTimeout(voiceState.repeatFillTimer);
+      voiceState.repeatFillTimer = null;
+      voiceState.buffer = [];
+      voiceState.tokenPreview = [];
+      voiceState.interimTokens = [];
+      voiceState.activeRowId = "";
+      voiceState.lastProcessedResultIndex = 0;
+      if (supportsSpeechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+      }
+      getStudentRows().forEach((tr) => tr.classList.remove("voice-active"));
+      if (voicePanel) voicePanel.classList.remove("visible");
+      updateVoicePanelInfo();
+    }
+
+    function clampVoicePanelToViewport() {
+      if (!voicePanel) return;
+      const rect = voicePanel.getBoundingClientRect();
+      const margin = 8;
+      const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+      const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+      const nextLeft = Math.min(Math.max(rect.left, margin), maxLeft);
+      const nextTop = Math.min(Math.max(rect.top, margin), maxTop);
+      if (Math.abs(nextLeft - rect.left) > 0.5 || Math.abs(nextTop - rect.top) > 0.5) {
+        voicePanel.style.left = `${nextLeft}px`;
+        voicePanel.style.top = `${nextTop}px`;
+        voicePanel.style.right = "auto";
+        voicePanel.style.bottom = "auto";
+      }
+    }
+
+    function initVoicePanelDrag() {
+      if (!voicePanel) return;
+      const handle = voicePanel.querySelector(".drag-handle");
+      if (!handle) return;
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let startLeft = 0;
+      let startTop = 0;
+
+      const onPointerMove = (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const rect = voicePanel.getBoundingClientRect();
+        const margin = 8;
+        const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+        const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+        const nextLeft = Math.min(Math.max(startLeft + dx, margin), maxLeft);
+        const nextTop = Math.min(Math.max(startTop + dy, margin), maxTop);
+        voicePanel.style.left = `${nextLeft}px`;
+        voicePanel.style.top = `${nextTop}px`;
+        voicePanel.style.right = "auto";
+        voicePanel.style.bottom = "auto";
+      };
+
+      const endDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        voicePanel.classList.remove("dragging");
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", endDrag);
+        document.removeEventListener("pointercancel", endDrag);
+        clampVoicePanelToViewport();
+      };
+
+      handle.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target && e.target.closest("button")) return;
+        dragging = true;
+        const rect = voicePanel.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        voicePanel.classList.add("dragging");
+        handle.setPointerCapture(e.pointerId);
+        document.addEventListener("pointermove", onPointerMove);
+        document.addEventListener("pointerup", endDrag);
+        document.addEventListener("pointercancel", endDrag);
+      });
+
+      window.addEventListener("resize", () => clampVoicePanelToViewport());
+    }
+
+    /* ── Print ── */
+    function makeAdminPrintRowId(r) {
+      return [
+        r?.batchId || "",
+        r?.timestamp || "",
+        r?.teacherName || "",
+        r?.grade || "",
+        r?.section || "",
+        r?.subject || "",
+        r?.exam || "",
+        r?.studentName || ""
+      ].join("::");
+    }
+    function mapAdminRowToPrint(r, visibleSet = null) {
+      const rowId = makeAdminPrintRowId(r);
+      const recallRaw = r?.recall ?? "";
+      const understandRaw = r?.understand ?? "";
+      const hotsRaw = r?.hots ?? "";
+      const totalRaw = r?.total ?? "";
+      const recall = String(recallRaw).trim();
+      const understand = String(understandRaw).trim();
+      const hots = String(hotsRaw).trim();
+      const total = String(totalRaw).trim();
+      const computedLevel = computeLevel(
+        Number(recall || 0),
+        Number(understand || 0),
+        Number(hots || 0),
+        Number(r?.maxRecall || 0),
+        Number(r?.maxUnderstand || 0),
+        Number(r?.maxHots || 0)
+      ).txt;
+      const totalNumber = Number(total || 0);
+      const totalMax = Number(r?.totalMax || 0) || (Number(r?.maxRecall || 0) + Number(r?.maxUnderstand || 0) + Number(r?.maxHots || 0));
+      const estimate = computeEstimate(totalNumber, totalMax).txt;
+      const skillScale = computeSkillScale(
+        Number(recall || 0),
+        Number(understand || 0),
+        Number(hots || 0),
+        Number(r?.maxRecall || 0),
+        Number(r?.maxUnderstand || 0),
+        Number(r?.maxHots || 0)
+      );
+      const level = computedLevel !== "—" ? computedLevel : String(r?.level || "—");
+      const plan = String(r?.plan || "").trim();
+      const skillMeasure = formatSkillScale(skillScale);
+      const skillCode = Number(skillScale.code);
+      return {
+        rowId,
+        sn: "",
+        name: String(r?.studentName || r?.name || "").trim(),
+        recall,
+        understand,
+        hots,
+        total,
+        estimate,
+        skillMeasure,
+        level,
+        plan,
+        hasPlan: !!plan,
+        isWeak: Number.isFinite(skillCode) ? skillCode > 1 : isWeakLevel(level),
+        hasMissing: recall === "" || understand === "" || hots === "",
+        visible: visibleSet ? visibleSet.has(rowId) : true
+      };
+    }
+    function getAdminPrintSnapshot() {
+      if (typeof adminDash === "undefined" || !adminDash || typeof adminDash.getPrintSnapshot !== "function") {
+        return null;
+      }
+      return adminDash.getPrintSnapshot();
+    }
+    function getPrintMeta(context = activePrintContext) {
+      const schoolName = sessionStorage.getItem(SESSION_SCHOOL_NAME_KEY) || "—";
+      let teacherName = teacherSel?.value?.trim() || "—";
+      let grade = gradeSel?.value?.trim() || "—";
+      let section = sectionSel?.value?.trim() || "—";
+      let subject = subjectSel?.value?.trim() || "—";
+      if (context === "admin") {
+        const snap = getAdminPrintSnapshot();
+        if (snap?.filters) {
+          teacherName = snap.filters.teacher || "—";
+          grade = snap.filters.grade || "—";
+          section = snap.filters.section || "—";
+          subject = snap.filters.subject || "—";
+        }
+      }
+      const dateTime = new Date().toLocaleString("ar-EG", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      return { schoolName, teacherName, grade, section, subject, dateTime };
+    }
+    function getPrintRows(context = activePrintContext) {
+      if (context === "admin") {
+        const snap = getAdminPrintSnapshot();
+        if (!snap) return [];
+        const visibleSet = new Set((snap.filteredRows || []).map((r) => makeAdminPrintRowId(r)));
+        return (snap.baseRows || [])
+          .map((r) => mapAdminRowToPrint(r, visibleSet))
+          .filter((r) => r.name);
+      }
+      return getStudentRows()
+        .map((tr) => {
+          const recall = (tr.querySelector(".recall")?.value || "").trim();
+          const understand = (tr.querySelector(".understand")?.value || "").trim();
+          const hots = (tr.querySelector(".hots")?.value || "").trim();
+          const total = (tr.querySelector(".total")?.value || "").trim();
+          const plan = (tr.querySelector(".planInput")?.value || "").trim();
+          const level = getLevelFromRow(tr);
+          const mr = num(maxRecallEl.value);
+          const mu = num(maxUnderstandEl.value);
+          const mh = num(maxHotsEl.value);
+          const estimate = computeEstimate(Number(total || 0), mr + mu + mh).txt;
+          const skillScale = computeSkillScale(
+            Number(recall || 0),
+            Number(understand || 0),
+            Number(hots || 0),
+            mr,
+            mu,
+            mh
+          );
+          const skillMeasure = formatSkillScale(skillScale);
+          const skillCode = Number(skillScale.code);
+          return {
+            rowId: tr.dataset.rowId || "",
+            sn: (tr.querySelector(".row-index")?.textContent || "").trim(),
+            name: getRowName(tr),
+            recall,
+            understand,
+            hots,
+            total,
+            estimate,
+            skillMeasure,
+            level,
+            plan,
+            hasPlan: !!plan,
+            isWeak: Number.isFinite(skillCode) ? skillCode > 1 : isWeakLevel(level),
+            hasMissing: recall === "" || understand === "" || hots === "",
+            visible: tr.style.display !== "none"
+          };
+        })
+        .filter((r) => r.name);
+    }
+
+    function renderPrintHeader(title) {
+      const meta = getPrintMeta();
+      return `
+        <div class="print-head">
+          <div class="print-school">${esc(meta.schoolName)}</div>
+          <div class="print-title">${esc(title)}</div>
+          <div class="print-meta-grid">
+            <div><strong>الصف:</strong> ${esc(meta.grade)}</div>
+            <div><strong>الشعبة:</strong> ${esc(meta.section)}</div>
+            <div><strong>المادة:</strong> ${esc(meta.subject)}</div>
+            <div><strong>المعلمة:</strong> ${esc(meta.teacherName)}</div>
+            <div><strong>التاريخ والوقت:</strong> ${esc(meta.dateTime)}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPrintRowsTable(rows, blank = false) {
+      if (!rows.length) return `<div class="print-empty">لا توجد بيانات متاحة لهذا الخيار.</div>`;
+      const body = rows
+        .map((r, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td class="print-name">${esc(r.name)}</td>
+            <td>${blank ? "" : esc(r.recall || "—")}</td>
+            <td>${blank ? "" : esc(r.understand || "—")}</td>
+            <td>${blank ? "" : esc(r.hots || "—")}</td>
+            <td>${blank ? "" : esc(r.total || "—")}</td>
+            <td>${blank ? "" : esc(r.estimate || "—")}</td>
+            <td>${blank ? "" : esc(r.skillMeasure || "—")}</td>
+            <td>${blank ? "" : esc(r.plan || "—")}</td>
+          </tr>
+        `)
+        .join("");
+      return `
+        <table class="print-table">
+          <thead>
+            <tr>
+              <th>SN</th>
+              <th>اسم الطالبة</th>
+              <th>التذكر</th>
+              <th>الفهم</th>
+              <th>المهارات العليا</th>
+              <th>المجموع</th>
+              <th>التقدير</th>
+              <th>القياس المهاري</th>
+              <th>الخطة العلاجية</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      `;
+    }
+
+    function renderPrintSummary(rows) {
+      const total = rows.length;
+      const missing = rows.filter((r) => r.hasMissing).length;
+      const entered = total - missing;
+      const weak = rows.filter((r) => r.isWeak).length;
+      const plans = rows.filter((r) => r.hasPlan).length;
+      const totals = rows.map((r) => Number(r.total || 0)).filter((v) => Number.isFinite(v) && v > 0);
+      const avgTotal = totals.length ? (totals.reduce((a, b) => a + b, 0) / totals.length).toFixed(2) : "0.00";
+      return `
+        <table class="print-summary-table">
+          <tbody>
+            <tr><th>إجمالي الطالبات</th><td>${total}</td></tr>
+            <tr><th>الطالبات المدخلة علاماتهن</th><td>${entered}</td></tr>
+            <tr><th>الطالبات الناقصات علامات</th><td>${missing}</td></tr>
+            <tr><th>عدد الطالبات ذوات الضعف</th><td>${weak}</td></tr>
+            <tr><th>عدد الخطط العلاجية</th><td>${plans}</td></tr>
+            <tr><th>متوسط المجموع</th><td>${avgTotal}</td></tr>
+          </tbody>
+        </table>
+      `;
+    }
+
+    function getRowsForPrintMode(mode, allRows) {
+      if (mode === "all") return allRows;
+      if (mode === "with-plan") return allRows.filter((r) => r.hasPlan);
+      if (mode === "without-plan") return allRows.filter((r) => !r.hasPlan);
+      if (mode === "weak") return allRows.filter((r) => r.isWeak);
+      if (mode === "missing") return allRows.filter((r) => r.hasMissing);
+      if (mode === "filtered") return allRows.filter((r) => r.visible);
+      if (mode === "single") {
+        const targetId = activePrintContext === "admin"
+          ? selectedAdminRowId
+          : (selectedRowId || voiceState.activeRowId);
+        const picked = allRows.find((r) => r.rowId === targetId);
+        if (picked) return [picked];
+        return allRows.length ? [allRows[0]] : [];
+      }
+      if (mode === "blank") return allRows;
+      return allRows;
+    }
+
+    function printModeTitle(mode) {
+      if (mode === "all") return "طباعة جميع الطالبات في الصف/الشعبة الحالية";
+      if (mode === "with-plan") return "طباعة الطالبات ذوات الخطة العلاجية فقط";
+      if (mode === "without-plan") return "طباعة الطالبات بدون خطة علاجية";
+      if (mode === "weak") return "طباعة الطالبات ذوات الضعف فقط";
+      if (mode === "missing") return "طباعة الطالبات ناقصات العلامات";
+      if (mode === "filtered") return "طباعة العرض المفلتر الحالي";
+      if (mode === "single") return "طباعة صف طالبة واحدة";
+      if (mode === "summary") return "طباعة ورقة الملخص";
+      if (mode === "blank") return "طباعة ورقة إدخال فارغة";
+      return "طباعة";
+    }
+
+    function closePrintModalBox() {
+      if (printModal) printModal.classList.remove("visible");
+    }
+
+    function openPrintModalBox(context = "teacher") {
+      activePrintContext = context === "admin" ? "admin" : "teacher";
+      if (printModalTitle) {
+        printModalTitle.textContent = activePrintContext === "admin"
+          ? "خيارات الطباعة - لوحة المديرة"
+          : "خيارات الطباعة";
+      }
+      const hasRows = activePrintContext === "admin"
+        ? getPrintRows("admin").length > 0
+        : hasTableRows();
+      if (!hasRows) {
+        showQuickNotice("لا توجد بيانات للطباعة", "warn", 1700);
+        return;
+      }
+      if (printModal) printModal.classList.add("visible");
+    }
+
+    function buildPrintSheetForMode(mode) {
+      const allRows = getPrintRows(activePrintContext);
+      const title = printModeTitle(mode);
+      let bodyHtml = "";
+      if (mode === "summary") {
+        bodyHtml = renderPrintSummary(allRows);
+      } else {
+        const rows = getRowsForPrintMode(mode, allRows);
+        if (!rows.length) return { ok: false, title };
+        bodyHtml = renderPrintRowsTable(rows, mode === "blank");
+      }
+      if (!printSheet) return { ok: false, title };
+      printSheet.innerHTML = `
+        <div class="print-page">
+          ${renderPrintHeader(title)}
+          ${bodyHtml}
+        </div>
+      `;
+      return { ok: true, title };
+    }
+
+    function startPrintMode(mode) {
+      const res = buildPrintSheetForMode(mode);
+      if (!res.ok) {
+        showQuickNotice("لا توجد بيانات مناسبة لخيار الطباعة المحدد", "warn", 1800);
+        return;
+      }
+      closePrintModalBox();
+      setTimeout(() => window.print(), 60);
+    }
+
+    function clearPrintSheet() {
+      if (printSheet) printSheet.innerHTML = "";
     }
 
     /* ── Boot ── */
@@ -605,6 +2364,59 @@
       $("btnClearScores").addEventListener("click", ()=>{
         if(confirm("مسح الدرجات والخطة فقط؟ (الأسماء ستبقى)")) { clearScoresOnly(); setStatus("warn","تم مسح الدرجات فقط"); }
       });
+      if (studentSearchInput) {
+        studentSearchInput.addEventListener("input", () => {
+          scheduleStudentRowsRefresh(true);
+        });
+      }
+      if (btnVoiceEntry) {
+        btnVoiceEntry.addEventListener("click", () => openVoicePanel());
+      }
+      if (voiceSnInput) {
+        const applySn = (shouldSpeakName = false) => {
+          const raw = String(voiceSnInput.value || "").trim();
+          if (!raw) return;
+          setVoiceActiveBySn(raw, true, shouldSpeakName);
+        };
+        voiceSnInput.addEventListener("input", () => {
+          clearTimeout(voiceSnInputTimer);
+          voiceSnInputTimer = setTimeout(() => applySn(true), 240);
+        });
+        voiceSnInput.addEventListener("change", () => applySn(true));
+        voiceSnInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            clearTimeout(voiceSnInputTimer);
+            applySn(true);
+          }
+        });
+      }
+      if (voiceStartBtn) voiceStartBtn.addEventListener("click", () => startVoiceRecognition());
+      if (voiceStopBtn) voiceStopBtn.addEventListener("click", () => stopVoiceRecognition(true));
+      if (voiceUndoBtn) voiceUndoBtn.addEventListener("click", () => undoVoiceLastRow());
+      if (voiceCloseBtn) voiceCloseBtn.addEventListener("click", () => closeVoicePanel());
+      if (quickNoticeBtn) quickNoticeBtn.addEventListener("click", () => hideQuickNotice());
+      if (voicePanel) {
+        voicePanel.addEventListener("click", (e) => e.stopPropagation());
+        initVoicePanelDrag();
+      }
+      if (btnPrint) {
+        btnPrint.addEventListener("click", () => openPrintModalBox("teacher"));
+      }
+      if (adminPrintBtn) adminPrintBtn.addEventListener("click", () => openPrintModalBox("admin"));
+      if (printModalClose) printModalClose.addEventListener("click", closePrintModalBox);
+      if (printModal) {
+        printModal.addEventListener("click", (e) => {
+          if (e.target === printModal) closePrintModalBox();
+        });
+      }
+      document.querySelectorAll(".print-option-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const mode = btn.getAttribute("data-print-mode") || "";
+          if (!mode) return;
+          startPrintMode(mode);
+        });
+      });
       function onClearAllClick() {
         if (clearingAll) return;
         if(confirm("تفريغ الكل وحذف جميع البيانات المخزنة؟")) {
@@ -617,6 +2429,7 @@
         clearBtn.removeEventListener("click", onClearAllClick);
         clearBtn.addEventListener("click", onClearAllClick);
       }
+      initGridClipboardInteractions();
 
       modalCancel.addEventListener("click", ()=>{ confirmModal.classList.remove("visible"); pendingSubmit=null; });
       modalConfirm.addEventListener("click", ()=>{ if(pendingSubmit) pendingSubmit(); confirmModal.classList.remove("visible"); pendingSubmit=null; });
@@ -631,20 +2444,30 @@
 
       [maxRecallEl,maxUnderstandEl,maxHotsEl].forEach(el=>el.addEventListener("input",()=>{
         computeTotalMax();
+        clampAllRowsToCurrentLimits(false);
         scheduleDraftSave();
       }));
       [teacherSel,gradeSel,sectionSel,subjectSel,examSel].forEach(s=>{
         s.addEventListener("change",()=>{
           scheduleDraftSave();
           updateAutoFillButtonState();
+          refreshStudentRowsView({ skipSort: true });
           if(s===gradeSel||s===sectionSel) setStatus("warn","تم تغيير الصف/الشعبة","اضغط (تعبئة تلقائية) لتحديث قائمة الطالبات");
         });
       });
 
       loadLookups();
       updateAutoFillButtonState();
+      refreshStudentRowsView({ skipSort: true });
+      updateVoicePanelInfo();
 
-      window.addEventListener("beforeunload", ()=>{ pendingSubmit=null; stopLoading(); });
+      window.addEventListener("afterprint", clearPrintSheet);
+      window.addEventListener("beforeunload", ()=>{
+        pendingSubmit = null;
+        stopLoading();
+        stopVoiceRecognition(false);
+        clearPrintSheet();
+      });
     }
 
     /* ══════════════════════════════
@@ -667,10 +2490,8 @@
         return String(s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
       }
 
-      function levelChip(lvl) {
-        const map = { 'ممتاز':'ok', 'جيد':'warn', 'ضعيف':'bad' };
-        const cls = map[lvl] || '';
-        return `<span class="result-chip ${cls}">${esc(lvl||'—')}</span>`;
+      function resultChip(text, cls = '') {
+        return `<span class="result-chip ${cls}">${esc(text || '—')}</span>`;
       }
 
       // تلوين الكارد حسب النسبة المئوية
@@ -692,73 +2513,117 @@
         const n = rows.length;
 
         // إعادة تعيين الكاردات
-        ['recall','understand','hots','total'].forEach(k => {
+        ['avg-recall','avg-understand','avg-hots','avg-total'].forEach(k => {
           const card = document.getElementById('sc-'+k+'-card');
           if(card) card.classList.remove('ok-card','warn-card','bad-card');
         });
 
         if (n === 0) {
-          ['sc-count','sc-recall','sc-understand','sc-hots','sc-total','sc-pass','sc-fail'].forEach(id => set(id,'—'));
-          ['sc-pass-pct','sc-fail-pct'].forEach(id => set(id,'—%'));
-          ['sc-recall-n','sc-understand-n','sc-hots-n','sc-total-n'].forEach(id => set(id,'— طالبة'));
-          set('sc-count-lbl','بعد الفلترة');
+          [
+            'sc-count','sc-avg-total','sc-pass','sc-fail',
+            'sc-avg-recall','sc-avg-understand','sc-avg-hots',
+            'sc-no-weak','sc-weak-recall','sc-weak-understand','sc-weak-hots',
+            'sc-weak-one','sc-weak-two','sc-weak-all'
+          ].forEach(id => set(id,'—'));
+          ['sc-no-weak-pct','sc-weak-recall-pct','sc-weak-understand-pct','sc-weak-hots-pct'].forEach(id => set(id,'—% من الإجمالي'));
+          ['sc-avg-recall-sub','sc-avg-understand-sub','sc-avg-hots-sub'].forEach(id => set(id,'—'));
+          ['sc-weak-one-sub','sc-weak-two-sub','sc-weak-all-sub'].forEach(id => set(id,'—% من الإجمالي'));
           return;
         }
 
-        let sumR=0, sumU=0, sumH=0, sumT=0, pass=0, fail=0;
-        let maxR=0, maxU=0, maxH=0, maxTot=0, cntMax=0;
+        let sumR=0, sumU=0, sumH=0;
+        let sumTotalPct=0, totalPctCount=0;
+        let pass=0, fail=0;
+        let maxR=0, maxU=0, maxH=0, cntMax=0;
+        let noWeak=0, weakRecall=0, weakUnderstand=0, weakHots=0;
+        let weakOne=0, weakTwo=0, weakAll=0;
 
         for (const r of rows) {
-          sumR  += Number(r.recall)||0;
-          sumU  += Number(r.understand)||0;
-          sumH  += Number(r.hots)||0;
-          sumT  += Number(r.total)||0;
-          maxR  += Number(r.maxRecall)||0;
-          maxU  += Number(r.maxUnderstand)||0;
-          maxH  += Number(r.maxHots)||0;
-          maxTot+= Number(r.totalMax)||(Number(r.maxRecall||0)+Number(r.maxUnderstand||0)+Number(r.maxHots||0));
+          const recall = Number(r.recall)||0;
+          const understand = Number(r.understand)||0;
+          const hots = Number(r.hots)||0;
+          const total = Number(r.total)||0;
+          const maxRecall = Number(r.maxRecall)||0;
+          const maxUnderstand = Number(r.maxUnderstand)||0;
+          const maxHots = Number(r.maxHots)||0;
+          const totalMax = Number(r.totalMax)||(maxRecall+maxUnderstand+maxHots);
+
+          sumR  += recall;
+          sumU  += understand;
+          sumH  += hots;
+          maxR  += maxRecall;
+          maxU  += maxUnderstand;
+          maxH  += maxHots;
           cntMax++;
-          const mT = Number(r.totalMax)||(Number(r.maxRecall||0)+Number(r.maxUnderstand||0)+Number(r.maxHots||0));
-          const threshold = mT > 0 ? mT * PASS_THRESHOLD_PCT : Infinity;
-          if ((Number(r.total)||0) >= threshold) pass++; else fail++;
+
+          if (totalMax > 0) {
+            sumTotalPct += (total / totalMax) * 100;
+            totalPctCount += 1;
+          }
+
+          const threshold = totalMax > 0 ? totalMax * PASS_THRESHOLD_PCT : Infinity;
+          if (total >= threshold) pass++; else fail++;
+
+          const weakSkills = getWeakSkills(recall, understand, hots, maxRecall, maxUnderstand, maxHots) || [];
+          if (weakSkills.length === 0) {
+            noWeak += 1;
+          } else {
+            if (weakSkills.includes("التذكر")) weakRecall += 1;
+            if (weakSkills.includes("الفهم")) weakUnderstand += 1;
+            if (weakSkills.includes("المهارات العليا")) weakHots += 1;
+          }
+          if (weakSkills.length === 1) weakOne += 1;
+          else if (weakSkills.length === 2) weakTwo += 1;
+          else if (weakSkills.length === 3) weakAll += 1;
         }
 
         const avgMaxR   = cntMax>0 ? maxR/cntMax   : 0;
         const avgMaxU   = cntMax>0 ? maxU/cntMax   : 0;
         const avgMaxH   = cntMax>0 ? maxH/cntMax   : 0;
-        const avgMaxTot = cntMax>0 ? maxTot/cntMax : 0;
 
-        const avgR = sumR/n, avgU = sumU/n, avgH = sumH/n, avgTot = sumT/n;
+        const avgR = sumR/n, avgU = sumU/n, avgH = sumH/n;
+        const avgTotalPct = totalPctCount > 0 ? (sumTotalPct / totalPctCount) : 0;
 
         // النسب المئوية لتحديد اللون
         const pctR   = avgMaxR>0   ? (avgR/avgMaxR)*100   : null;
         const pctU   = avgMaxU>0   ? (avgU/avgMaxU)*100   : null;
         const pctH   = avgMaxH>0   ? (avgH/avgMaxH)*100   : null;
-        const pctTot = avgMaxTot>0 ? (avgTot/avgMaxTot)*100 : null;
+        const pctTot = totalPctCount > 0 ? avgTotalPct : null;
 
         set('sc-count', n);
-        set('sc-count-lbl', 'إجمالي الطالبات المفلترة');
+        set('sc-avg-total', numF(avgTotalPct,1));
+        colorCard(document.getElementById('sc-avg-total-card'), document.getElementById('sc-avg-total'), pctTot);
 
-        set('sc-recall',     numF(avgR));
-        set('sc-recall-n',   n + ' طالبة');
-        colorCard(document.getElementById('sc-recall-card'), document.getElementById('sc-recall'), pctR);
+        set('sc-avg-recall',     numF(avgR));
+        set('sc-avg-recall-sub', `من ${n} طالبة`);
+        colorCard(document.getElementById('sc-avg-recall-card'), document.getElementById('sc-avg-recall'), pctR);
 
-        set('sc-understand',   numF(avgU));
-        set('sc-understand-n', n + ' طالبة');
-        colorCard(document.getElementById('sc-understand-card'), document.getElementById('sc-understand'), pctU);
+        set('sc-avg-understand',   numF(avgU));
+        set('sc-avg-understand-sub', `من ${n} طالبة`);
+        colorCard(document.getElementById('sc-avg-understand-card'), document.getElementById('sc-avg-understand'), pctU);
 
-        set('sc-hots',   numF(avgH));
-        set('sc-hots-n', n + ' طالبة');
-        colorCard(document.getElementById('sc-hots-card'), document.getElementById('sc-hots'), pctH);
-
-        set('sc-total',   numF(avgTot));
-        set('sc-total-n', n + ' طالبة');
-        colorCard(document.getElementById('sc-total-card'), document.getElementById('sc-total'), pctTot);
+        set('sc-avg-hots',   numF(avgH));
+        set('sc-avg-hots-sub', `من ${n} طالبة`);
+        colorCard(document.getElementById('sc-avg-hots-card'), document.getElementById('sc-avg-hots'), pctH);
 
         set('sc-pass', pass);
         set('sc-fail', fail);
-        set('sc-pass-pct', numF(pass/n*100,1) + '%');
-        set('sc-fail-pct', numF(fail/n*100,1) + '%');
+
+        set('sc-no-weak', noWeak);
+        set('sc-weak-recall', weakRecall);
+        set('sc-weak-understand', weakUnderstand);
+        set('sc-weak-hots', weakHots);
+        set('sc-no-weak-pct', numF(noWeak/n*100,1) + '% من الإجمالي');
+        set('sc-weak-recall-pct', numF(weakRecall/n*100,1) + '% من الإجمالي');
+        set('sc-weak-understand-pct', numF(weakUnderstand/n*100,1) + '% من الإجمالي');
+        set('sc-weak-hots-pct', numF(weakHots/n*100,1) + '% من الإجمالي');
+
+        set('sc-weak-one', weakOne);
+        set('sc-weak-two', weakTwo);
+        set('sc-weak-all', weakAll);
+        set('sc-weak-one-sub', numF(weakOne/n*100,1) + '% من الإجمالي');
+        set('sc-weak-two-sub', numF(weakTwo/n*100,1) + '% من الإجمالي');
+        set('sc-weak-all-sub', numF(weakAll/n*100,1) + '% من الإجمالي');
       }
 
       // لون الخلية حسب نسبة الدرجة من الحد الأقصى
@@ -775,13 +2640,17 @@
         const chip = document.getElementById('admin-count-chip');
         if (chip) chip.textContent = rows.length + ' سجل';
         if (!rows.length) {
-          tbody.innerHTML = '<tr class="loading-row"><td colspan="12">لا توجد نتائج مطابقة للفلاتر</td></tr>';
+          tbody.innerHTML = '<tr class="loading-row"><td colspan="13">لا توجد نتائج مطابقة للفلاتر</td></tr>';
           return;
         }
         const frag = document.createDocumentFragment();
         rows.forEach((r, i) => {
           const tr = document.createElement('tr');
-          const lvl = r.level || computeLevelFromRow(r);
+          const rowId = makeAdminPrintRowId(r);
+          tr.dataset.rowId = rowId;
+          if (selectedAdminRowId && selectedAdminRowId === rowId) {
+            tr.classList.add('admin-row-selected');
+          }
           const mr = Number(r.maxRecall)||0;
           const mu = Number(r.maxUnderstand)||0;
           const mh = Number(r.maxHots)||0;
@@ -790,6 +2659,8 @@
           const uv = r.understand === '' || r.understand === null || r.understand === undefined ? 0 : Number(r.understand);
           const hv = r.hots === '' || r.hots === null || r.hots === undefined ? 0 : Number(r.hots);
           const tv = r.total === '' || r.total === null || r.total === undefined ? 0 : Number(r.total);
+          const estimate = computeEstimate(tv, mt);
+          const skillScale = computeSkillScale(rv, uv, hv, mr, mu, mh);
 
           const rcStyle  = cellColor(rv, mr);
           const ucStyle  = cellColor(uv, mu);
@@ -807,9 +2678,16 @@
             <td class="mono" style="text-align:center;${ucStyle}">${isNaN(uv)?'—':uv}</td>
             <td class="mono" style="text-align:center;${hcStyle}">${isNaN(hv)?'—':hv}</td>
             <td class="mono" style="text-align:center;${totStyle}">${isNaN(tv)?'—':tv}</td>
-            <td>${levelChip(lvl)}</td>
+            <td>${resultChip(estimate.txt, estimate.cls)}</td>
+            <td>${resultChip(formatSkillScale(skillScale), skillScale.cls)}</td>
             <td style="color:var(--muted);font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.plan||'—')}</td>
           `;
+          tr.addEventListener('click', () => {
+            selectedAdminRowId = rowId;
+            const allTrs = tbody.querySelectorAll('tr');
+            allTrs.forEach((rowEl) => rowEl.classList.remove('admin-row-selected'));
+            tr.classList.add('admin-row-selected');
+          });
           frag.appendChild(tr);
         });
         tbody.innerHTML = '';
@@ -821,11 +2699,7 @@
       function computeLevelFromRow(r) {
         const recall=Number(r.recall)||0, understand=Number(r.understand)||0, hots=Number(r.hots)||0;
         const mr=Number(r.maxRecall)||0, mu=Number(r.maxUnderstand)||0, mh=Number(r.maxHots)||0;
-        if(mr<=0||mu<=0||mh<=0) return '—';
-        const pr=recall/mr*100, pu=understand/mu*100, ph=hots/mh*100;
-        if(pr<50||pu<50||ph<50) return 'ضعيف';
-        if(pr>=80&&pu>=80&&ph>=80) return 'ممتاز';
-        return 'جيد';
+        return computeLevel(recall, understand, hots, mr, mu, mh).txt;
       }
 
       function getAdminFilterValues() {
@@ -895,7 +2769,8 @@
         refreshAdminFilterOptions({ teacher, grade, section, subject, exam, level, search });
 
         filteredRows = allRows.filter(r => {
-          const rowLevel = r.level || computeLevelFromRow(r);
+          const computedLevel = computeLevelFromRow(r);
+          const rowLevel = computedLevel !== '—' ? computedLevel : (r.level || '—');
           if (teacher && r.teacherName !== teacher) return false;
           if (grade   && r.grade !== grade) return false;
           if (section && r.section !== section) return false;
@@ -908,9 +2783,30 @@
           }
           return true;
         });
+        if (selectedAdminRowId && !filteredRows.some((r) => makeAdminPrintRowId(r) === selectedAdminRowId)) {
+          selectedAdminRowId = filteredRows.length ? makeAdminPrintRowId(filteredRows[0]) : "";
+        }
 
         computeStats(filteredRows);
         renderTable(filteredRows);
+      }
+
+      function getPrintSnapshot() {
+        const { teacher, grade, section, subject, exam, level, search } = getAdminFilterValues();
+        const baseRows = allRows.filter((r) => {
+          if (teacher && r.teacherName !== teacher) return false;
+          if (grade && r.grade !== grade) return false;
+          if (section && r.section !== section) return false;
+          if (subject && r.subject !== subject) return false;
+          if (exam && r.exam !== exam) return false;
+          return true;
+        });
+        return {
+          baseRows,
+          filteredRows: [...filteredRows],
+          selectedRowId: selectedAdminRowId,
+          filters: { teacher, grade, section, subject, exam, level, search }
+        };
       }
 
       async function apiGet(params) {
@@ -939,7 +2835,7 @@
 
       async function loadData() {
         const tbody = document.getElementById('adminTbody');
-        tbody.innerHTML = '<tr class="loading-row"><td colspan="12">جاري تحميل البيانات... <span class="spinner"></span></td></tr>';
+        tbody.innerHTML = '<tr class="loading-row"><td colspan="13">جاري تحميل البيانات... <span class="spinner"></span></td></tr>';
         startLoading("جارٍ تحميل البيانات...");
 
         // ── Step 1: load assignments for dynamic dependent filters ──
@@ -975,10 +2871,10 @@
             maxHots:      Number(r[9]  || 0),
             totalMax:     Number(r[10] || 0),
             studentName:  r[11] || '',
-            recall:       Number(r[12] || 0),
-            understand:   Number(r[13] || 0),
-            hots:         Number(r[14] || 0),
-            total:        Number(r[15] || 0),
+            recall:       r[12] ?? '',
+            understand:   r[13] ?? '',
+            hots:         r[14] ?? '',
+            total:        r[15] ?? '',
             plan:         r[16] || ''
           }));
 
@@ -989,7 +2885,7 @@
           const footer = document.getElementById('admin-footer-batch');
           if (footer) footer.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA');
         } catch(e) {
-          tbody.innerHTML = `<tr class="loading-row"><td colspan="12" style="color:var(--bad);">
+          tbody.innerHTML = `<tr class="loading-row"><td colspan="13" style="color:var(--bad);">
             ${iconMarkup("triangle-alert")} ${esc(e.message)}<br/>
             <span style="font-size:11px;opacity:0.7;">تعذر تحميل البيانات من الخادم</span>
           </td></tr>`;
@@ -1029,7 +2925,7 @@
         });
       }
 
-      return { init, loadData };
+      return { init, loadData, getPrintSnapshot };
     })();
 
     /* ══════════════════════════════
@@ -1064,6 +2960,19 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || 'فشل الطلب');
         return data;
+      }
+
+      async function verifyCurrentUserPassword(password) {
+        const username = cleanInput(sessionStorage.getItem('school_session_user') || '');
+        const secret = cleanInput(password || '');
+        if (!username || !secret) return false;
+        const res = await fetch(withApiBase('/api/v1/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password: secret })
+        });
+        const data = await res.json().catch(() => ({}));
+        return Boolean(res.ok && data?.ok);
       }
 
       function setStat(id, value) {
@@ -1391,7 +3300,19 @@
           resetSchoolsBtn.addEventListener('click', async () => {
             const yes = confirm('هل فعلاً تريد مسح جميع بيانات المدارس؟ سيتم حذف المدارس والطالبات والمعلمات والنتائج نهائياً.');
             if (!yes) return;
+            const passwordInput = prompt('للتأكيد النهائي، أدخل كلمة مرور حسابك الحالي');
+            if (passwordInput === null) return;
+            const password = cleanInput(passwordInput);
+            if (!password) {
+              fail('لم يتم إدخال كلمة المرور. تم إلغاء العملية');
+              return;
+            }
             try {
+              const isPasswordValid = await verifyCurrentUserPassword(password);
+              if (!isPasswordValid) {
+                fail('كلمة المرور غير صحيحة. تم إلغاء العملية');
+                return;
+              }
               startLoading('جارٍ مسح جميع بيانات المدارس...');
               const response = await api('/api/v1/super/system/reset-schools', {
                 method: 'POST',

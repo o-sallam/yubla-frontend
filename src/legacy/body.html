@@ -45,6 +45,7 @@
           </div>
         </div>
         <div class="admin-topbar-right">
+          <button class="accent with-icon" id="adminPrint"><i data-lucide="printer" aria-hidden="true"></i><span>خيارات الطباعة</span></button>
           <button class="info with-icon" id="adminRefresh"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>تحديث البيانات</span></button>
         </div>
       </div>
@@ -62,12 +63,17 @@
             <div class="fg1"><label>الشعبة</label><select id="af-section"><option value="">— الكل —</option></select></div>
             <div class="fg1"><label>المادة</label><select id="af-subject"><option value="">— الكل —</option></select></div>
             <div class="fg1"><label>الامتحان</label><select id="af-exam"><option value="">— الكل —</option></select></div>
-            <div class="fg1"><label>التقييم</label>
+            <div class="fg1"><label>القياس المهاري</label>
               <select id="af-level">
                 <option value="">— الكل —</option>
-                <option value="ممتاز">ممتاز</option>
-                <option value="جيد">جيد</option>
-                <option value="ضعيف">ضعيف</option>
+                <option value="لا يوجد ضعف">لا يوجد ضعف</option>
+                <option value="ضعف في التذكر">ضعف في التذكر</option>
+                <option value="ضعف في الفهم">ضعف في الفهم</option>
+                <option value="ضعف في المهارات العليا">ضعف في المهارات العليا</option>
+                <option value="ضعف في التذكر والفهم">ضعف في التذكر والفهم</option>
+                <option value="ضعف في التذكر والمهارات العليا">ضعف في التذكر والمهارات العليا</option>
+                <option value="ضعف في الفهم والمهارات العليا">ضعف في الفهم والمهارات العليا</option>
+                <option value="ضعف عام">ضعف عام في جميع المهارات</option>
               </select>
             </div>
           </div>
@@ -76,48 +82,113 @@
 
       <!-- Stats Cards -->
       <div class="stats-grid">
-        <div class="stat-card info-card">
-          <div class="stat-icon"><i data-lucide="graduation-cap" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-count">—</div>
-          <div class="stat-lbl">عدد الطالبات</div>
-          <div class="stat-sub" id="sc-count-lbl">بعد الفلترة</div>
-        </div>
-        <div class="stat-card" id="sc-recall-card">
-          <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-recall">—</div>
-          <div class="stat-lbl">متوسط التذكر</div>
-          <div class="stat-sub" id="sc-recall-n">— طالبة</div>
-        </div>
-        <div class="stat-card" id="sc-understand-card">
-          <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-understand">—</div>
-          <div class="stat-lbl">متوسط الفهم</div>
-          <div class="stat-sub" id="sc-understand-n">— طالبة</div>
-        </div>
-        <div class="stat-card" id="sc-hots-card">
-          <div class="stat-icon"><i data-lucide="microscope" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-hots">—</div>
-          <div class="stat-lbl">متوسط المهارات العليا</div>
-          <div class="stat-sub" id="sc-hots-n">— طالبة</div>
-        </div>
-        <div class="stat-card" id="sc-total-card">
-          <div class="stat-icon"><i data-lucide="chart-column" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-total">—</div>
-          <div class="stat-lbl">متوسط العلامة الكلية</div>
-          <div class="stat-sub" id="sc-total-n">— طالبة</div>
-        </div>
-        <div class="stat-card ok-card">
-          <div class="stat-icon"><i data-lucide="circle-check-big" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-pass">—</div>
-          <div class="stat-lbl">الناجحات</div>
-          <div class="stat-sub" id="sc-pass-pct">—%</div>
-        </div>
-        <div class="stat-card bad-card">
-          <div class="stat-icon"><i data-lucide="circle-x" aria-hidden="true"></i></div>
-          <div class="stat-val" id="sc-fail">—</div>
-          <div class="stat-lbl">الراسبات</div>
-          <div class="stat-sub" id="sc-fail-pct">—%</div>
-        </div>
+        <section class="stats-section">
+          <div class="stats-section-title">الإحصاءات العامة</div>
+          <div class="stats-cards cols-4">
+            <div class="stat-card info-card" id="sc-count-card">
+              <div class="stat-icon"><i data-lucide="graduation-cap" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-count">—</div>
+              <div class="stat-lbl">عدد الطالبات</div>
+              <div class="stat-sub" id="sc-count-sub">بعد الفلترة</div>
+            </div>
+            <div class="stat-card" id="sc-avg-total-card">
+              <div class="stat-icon"><i data-lucide="chart-column" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-avg-total">—</div>
+              <div class="stat-lbl">متوسط المجموع</div>
+              <div class="stat-sub" id="sc-avg-total-sub">من 100</div>
+            </div>
+            <div class="stat-card ok-card" id="sc-pass-card">
+              <div class="stat-icon"><i data-lucide="circle-check-big" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-pass">—</div>
+              <div class="stat-lbl">عدد الناجحات</div>
+              <div class="stat-sub" id="sc-pass-sub">≥ 50%</div>
+            </div>
+            <div class="stat-card bad-card" id="sc-fail-card">
+              <div class="stat-icon"><i data-lucide="circle-x" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-fail">—</div>
+              <div class="stat-lbl">عدد الراسبات</div>
+              <div class="stat-sub" id="sc-fail-sub">&lt; 50%</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stats-section">
+          <div class="stats-section-title">متوسط المهارات</div>
+          <div class="stats-cards cols-3">
+            <div class="stat-card" id="sc-avg-recall-card">
+              <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-avg-recall">—</div>
+              <div class="stat-lbl">متوسط التذكر</div>
+              <div class="stat-sub" id="sc-avg-recall-sub">—</div>
+            </div>
+            <div class="stat-card" id="sc-avg-understand-card">
+              <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-avg-understand">—</div>
+              <div class="stat-lbl">متوسط الفهم</div>
+              <div class="stat-sub" id="sc-avg-understand-sub">—</div>
+            </div>
+            <div class="stat-card" id="sc-avg-hots-card">
+              <div class="stat-icon"><i data-lucide="microscope" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-avg-hots">—</div>
+              <div class="stat-lbl">متوسط المهارات العليا</div>
+              <div class="stat-sub" id="sc-avg-hots-sub">—</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stats-section">
+          <div class="stats-section-title">التشخيص التفصيلي</div>
+          <div class="stats-cards cols-4">
+            <div class="stat-card ok-card" id="sc-no-weak-card">
+              <div class="stat-icon"><i data-lucide="circle-check-big" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-no-weak">—</div>
+              <div class="stat-lbl">لا يوجد ضعف</div>
+              <div class="stat-sub" id="sc-no-weak-pct">—% من الإجمالي</div>
+            </div>
+            <div class="stat-card warn-card" id="sc-weak-recall-card">
+              <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-recall">—</div>
+              <div class="stat-lbl">ضعف في التذكر</div>
+              <div class="stat-sub" id="sc-weak-recall-pct">—% من الإجمالي</div>
+            </div>
+            <div class="stat-card warn-card" id="sc-weak-understand-card">
+              <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-understand">—</div>
+              <div class="stat-lbl">ضعف في الفهم</div>
+              <div class="stat-sub" id="sc-weak-understand-pct">—% من الإجمالي</div>
+            </div>
+            <div class="stat-card warn-card" id="sc-weak-hots-card">
+              <div class="stat-icon"><i data-lucide="microscope" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-hots">—</div>
+              <div class="stat-lbl">ضعف في المهارات العليا</div>
+              <div class="stat-sub" id="sc-weak-hots-pct">—% من الإجمالي</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stats-section">
+          <div class="stats-section-title">شدة الضعف</div>
+          <div class="stats-cards cols-3">
+            <div class="stat-card warn-card" id="sc-weak-one-card">
+              <div class="stat-icon"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-one">—</div>
+              <div class="stat-lbl">ضعف في مهارة واحدة</div>
+              <div class="stat-sub" id="sc-weak-one-sub">—% من الإجمالي</div>
+            </div>
+            <div class="stat-card bad-card" id="sc-weak-two-card">
+              <div class="stat-icon"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-two">—</div>
+              <div class="stat-lbl">ضعف في مهارتين</div>
+              <div class="stat-sub" id="sc-weak-two-sub">—% من الإجمالي</div>
+            </div>
+            <div class="stat-card bad-card" id="sc-weak-all-card">
+              <div class="stat-icon"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
+              <div class="stat-val" id="sc-weak-all">—</div>
+              <div class="stat-lbl">ضعف عام</div>
+              <div class="stat-sub" id="sc-weak-all-sub">—% من الإجمالي</div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Results Table -->
@@ -147,12 +218,13 @@
                 <th>الفهم</th>
                 <th>المهارات العليا</th>
                 <th>المجموع</th>
-                <th>التقييم</th>
+                <th>التقدير</th>
+                <th>القياس المهاري</th>
                 <th>الخطة العلاجية</th>
               </tr>
             </thead>
             <tbody id="adminTbody">
-              <tr class="loading-row"><td colspan="12">جاري تحميل البيانات… <span class="spinner"></span></td></tr>
+              <tr class="loading-row"><td colspan="13">جاري تحميل البيانات… <span class="spinner"></span></td></tr>
             </tbody>
           </table>
         </div>
@@ -172,7 +244,7 @@
         <div class="super-topbar-left">
           <button class="account-btn" id="acctOpenBtnSuper" title="إعدادات الحساب" aria-label="إعدادات الحساب"><i data-lucide="settings" aria-hidden="true"></i></button>
           <div class="super-title-text">
-            <h2>لوحة الأدمن</h2>
+            <h2>لوحة أدمن المنصة</h2>
             <p id="superWelcomeText">مرحبًا بك في إدارة المنصة</p>
           </div>
         </div>
@@ -205,7 +277,7 @@
         </div>
       </div>
 
-      <div class="super-grid">
+      <div class="super-grid super-tools-grid">
         <div class="main-card">
           <div class="card-header">
             <div class="h-title">إضافة أدمن منصة</div>
@@ -230,38 +302,37 @@
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="main-card">
-        <div class="card-header">
-          <div class="h-title">استيراد ملفات Excel للمعلمات والطالبات</div>
-        </div>
-        <div class="card-body">
-          <div class="form-grid">
-            <div class="f6">
-              <label>ملف المعلمات XLSX</label>
-              <input
-                type="file"
-                id="superTeachersCsvFile"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              />
-            </div>
-            <div class="f6">
-              <label>ملف الطالبات XLSX</label>
-              <input
-                type="file"
-                id="superStudentsCsvFile"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              />
-            </div>
-            <div class="f6">
-              <button class="info with-icon" id="superImportTeachersBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد المعلمات من XLSX</span></button>
-            </div>
-            <div class="f6">
-              <button class="info with-icon" id="superImportStudentsBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد الطالبات من XLSX</span></button>
-            </div>
-            <div class="f12">
-              <div class="status-bar" id="superImportResult" style="display:none;"></div>
+        <div class="main-card">
+          <div class="card-header">
+            <div class="h-title">استيراد ملفات Excel للمعلمات والطالبات</div>
+          </div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="f6">
+                <label>ملف المعلمات XLSX</label>
+                <input
+                  type="file"
+                  id="superTeachersCsvFile"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                />
+              </div>
+              <div class="f6">
+                <label>ملف الطالبات XLSX</label>
+                <input
+                  type="file"
+                  id="superStudentsCsvFile"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                />
+              </div>
+              <div class="f6">
+                <button class="info with-icon" id="superImportTeachersBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد المعلمات من XLSX</span></button>
+              </div>
+              <div class="f6">
+                <button class="info with-icon" id="superImportStudentsBtn"><i data-lucide="upload" aria-hidden="true"></i><span>استيراد الطالبات من XLSX</span></button>
+              </div>
+              <div class="f12">
+                <div class="status-bar" id="superImportResult" style="display:none;"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -472,6 +543,12 @@
       <div class="card-header">
         <div class="h-title">جدول الطالبات</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="table-inline-search">
+            <span class="search-icon"><i data-lucide="search" aria-hidden="true"></i></span>
+            <input type="text" id="studentSearchInput" placeholder="بحث باسم الطالبة" />
+          </div>
+          <button class="accent with-icon" id="btnVoiceEntry"><i data-lucide="mic" aria-hidden="true"></i><span>الإدخال الصوتي</span></button>
+          <button class="info with-icon" id="btnPrint"><i data-lucide="printer" aria-hidden="true"></i><span>طباعة</span></button>
           <span class="chip" id="validChip">التحقق: غير مطبق</span>
           <button class="danger with-icon" id="btnClearScores"><i data-lucide="x" aria-hidden="true"></i><span>مسح الدرجات</span></button>
         </div>
@@ -494,15 +571,15 @@
           <table>
             <thead>
               <tr>
-                <th class="row-num">#</th>
+                <th class="row-num">SN</th>
                 <th style="min-width:220px;">اسم الطالبة</th>
                 <th class="num-cell">التذكر</th>
                 <th class="num-cell">الفهم</th>
                 <th class="num-cell">المهارات العليا</th>
                 <th class="total-cell">المجموع</th>
+                <th style="min-width:90px;">التقدير</th>
+                <th style="min-width:150px;">القياس المهاري</th>
                 <th class="plan-cell">الخطة العلاجية</th>
-                <th style="min-width:90px;">التقييم</th>
-                <th style="min-width:64px;">حذف</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -514,6 +591,81 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ═══ VOICE ENTRY PANEL ═══ -->
+  <div class="voice-panel" id="voicePanel">
+    <div class="voice-panel-header drag-handle">
+      <div class="voice-title">الإدخال الصوتي السريع</div>
+      <button class="danger" id="voiceCloseBtn" aria-label="إغلاق">إغلاق</button>
+    </div>
+    <div class="voice-row">
+      <span class="voice-label">SN الحالي</span>
+      <span class="voice-value mono" id="voiceCurrentSn">—</span>
+    </div>
+    <div class="voice-row">
+      <span class="voice-label">انتقال إلى SN</span>
+      <input type="number" min="1" step="1" id="voiceSnInput" class="voice-sn-input" placeholder="اكتب SN" />
+    </div>
+    <div class="voice-row">
+      <span class="voice-label">الطالبة</span>
+      <span class="voice-value" id="voiceCurrentStudent">—</span>
+    </div>
+    <div class="voice-row">
+      <span class="voice-label">الحالة</span>
+      <span class="voice-value" id="voiceListeningStatus">غير نشط</span>
+    </div>
+    <div class="voice-preview-wrap">
+      <div class="voice-preview-label">القيم الصوتية الحالية</div>
+      <table class="voice-values-table">
+        <thead>
+          <tr>
+            <th>التذكر</th>
+            <th>الفهم</th>
+            <th>المهارات العليا</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="voiceRecallVal" class="mono">—</td>
+            <td id="voiceUnderstandVal" class="mono">—</td>
+            <td id="voiceHotsVal" class="mono">—</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="voice-preview mono" id="voiceTokensPreview">—</div>
+    </div>
+    <div class="voice-actions">
+      <button class="accent with-icon" id="voiceStartBtn"><i data-lucide="mic" aria-hidden="true"></i><span>بدء</span></button>
+      <button class="info with-icon" id="voiceStopBtn"><i data-lucide="mic-off" aria-hidden="true"></i><span>إيقاف</span></button>
+      <button class="danger with-icon" id="voiceUndoBtn"><i data-lucide="undo-2" aria-hidden="true"></i><span>تراجع آخر صف</span></button>
+    </div>
+  </div>
+
+  <!-- ═══ PRINT OPTIONS MODAL ═══ -->
+  <div class="modal-overlay" id="printModal">
+    <div class="modal-box print-modal">
+      <div class="modal-header">
+        <button class="danger" id="printModalClose">إغلاق</button>
+        <div class="modal-title" id="printModalTitle">خيارات الطباعة</div>
+      </div>
+      <div class="print-options-grid">
+        <button class="info print-option-btn" data-print-mode="all">طباعة جميع الطالبات (الصف/الشعبة)</button>
+        <button class="info print-option-btn" data-print-mode="filtered">طباعة العرض المفلتر الحالي</button>
+        <button class="info print-option-btn" data-print-mode="blank">طباعة ورقة إدخال فارغة</button>
+        <button class="info print-option-btn" data-print-mode="with-plan">طباعة الطالبات بخطة علاجية فقط</button>
+        <button class="info print-option-btn" data-print-mode="summary">طباعة ورقة الملخص</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PRINT SHEET ROOT ═══ -->
+  <div id="printSheet" aria-hidden="true"></div>
+
+  <!-- ═══ QUICK NOTICE ═══ -->
+  <div id="quickNotice" class="quick-notice" aria-live="polite">
+    <div class="quick-notice-text" id="quickNoticeText"></div>
+    <button type="button" class="quick-notice-btn" id="quickNoticeBtn">حسنًا</button>
   </div>
 
   <!-- ═══ CONTACT INFO MODAL ═══ -->
