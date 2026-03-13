@@ -1120,6 +1120,12 @@
         if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
         return data;
       }
+      if (action === "submissions") {
+        const res = await fetch(withApiBase("/api/v1/submissions"), { method: "GET", headers: getAuthHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
+        return data;
+      }
       throw new Error("action غير مدعوم");
     }
     async function apiPost(body) {
@@ -1211,12 +1217,80 @@
         if(!j.ok) throw new Error(j.error||"فشل");
         const list=j.students||[];
         setRows(list);
-        setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
+        const restored = await hydrateRowsFromLatestSubmission();
+        if (restored > 0) {
+          setStatus("ok", `تمت تعبئة ${list.length} طالبة`, `تم استرجاع آخر إرسال (${restored} طالبة)`);
+        } else {
+          setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
+        }
         succeed("تم جلب البيانات بنجاح");
       } catch(e) {
         setStatus("bad","تعذر تعبئة الطالبات",e.message);
         fail("تعذر جلب البيانات");
       }
+    }
+    async function hydrateRowsFromLatestSubmission() {
+      const teacherName = teacherSel.value.trim();
+      const grade = gradeSel.value.trim();
+      const section = sectionSel.value.trim();
+      const subject = subjectSel.value.trim();
+      const exam = examSel.value.trim();
+      if (!teacherName || !grade || !section || !subject || !exam) return 0;
+
+      const res = await apiGet({ action: "submissions" });
+      const allRows = Array.isArray(res?.rows) ? res.rows : [];
+      if (!allRows.length) return 0;
+
+      const normalize = (v) => String(v || "").trim();
+      const matched = allRows.filter((r) =>
+        normalize(r?.[2]) === teacherName &&
+        normalize(r?.[3]) === grade &&
+        normalize(r?.[4]) === section &&
+        normalize(r?.[5]) === subject &&
+        normalize(r?.[6]) === exam
+      );
+      if (!matched.length) return 0;
+
+      const latestBatchId = normalize(matched[0]?.[1]);
+      const currentBatchRows = matched.filter((r) => normalize(r?.[1]) === latestBatchId);
+      if (!currentBatchRows.length) return 0;
+
+      const byName = new Map();
+      currentBatchRows.forEach((r) => {
+        const name = normalize(r?.[11]);
+        if (!name || byName.has(name)) return;
+        byName.set(name, {
+          recall: r?.[12] ?? "",
+          understand: r?.[13] ?? "",
+          hots: r?.[14] ?? "",
+          plan: r?.[16] ?? ""
+        });
+      });
+
+      let hydrated = 0;
+      getStudentRows().forEach((tr) => {
+        const name = (tr.querySelector(".studentName")?.value || "").trim();
+        if (!name) return;
+        const prev = byName.get(name);
+        if (!prev) return;
+        const recallInput = tr.querySelector(".recall");
+        const understandInput = tr.querySelector(".understand");
+        const hotsInput = tr.querySelector(".hots");
+        const planInput = tr.querySelector(".planInput");
+        if (!recallInput || !understandInput || !hotsInput || !planInput) return;
+        recallInput.value = prev.recall === "" ? "" : String(prev.recall);
+        understandInput.value = prev.understand === "" ? "" : String(prev.understand);
+        hotsInput.value = prev.hots === "" ? "" : String(prev.hots);
+        planInput.value = prev.plan === "" ? "" : String(prev.plan);
+        recallInput.dispatchEvent(new Event("input", { bubbles: true }));
+        hydrated += 1;
+      });
+
+      if (hydrated > 0) {
+        lastBatch.textContent = latestBatchId || "—";
+        saveDraftSoft();
+      }
+      return hydrated;
     }
     function checkIncomplete() {
       return getStudentRows().filter(tr => {
@@ -1280,8 +1354,8 @@
         const j=await apiPost({action:"submit",...payload});
         if(!j.ok) throw new Error(j.error||"فشل");
         lastBatch.textContent=j.batchId||"—";
-        setStatus("ok",`تم الإرسال بنجاح (${j.inserted} سجل)`,`BatchID: ${j.batchId}`);
-        clearDraft();
+        setStatus("ok",`تم حفظ الإرسال بنجاح (${j.inserted} سجل)`,`يمكنك التعديل وإعادة الإرسال لنفس الصف | BatchID: ${j.batchId}`);
+        saveDraftSoft();
         succeed("تم إرسال البيانات بنجاح");
       } catch(e) {
         setStatus("bad","فشل الإرسال",e.message);
