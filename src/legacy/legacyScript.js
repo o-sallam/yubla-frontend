@@ -77,6 +77,7 @@
     let draftTimer = null;
     let lastDraftHeader = null;
     let clearingAll = false;
+    let suppressLimitNotices = false;
     let rowSeq = 0;
     let selectedRowId = "";
     let selectedAdminRowId = "";
@@ -200,7 +201,6 @@
     }
     function computeTotalMax() {
       totalMaxEl.value = num(maxRecallEl.value) + num(maxUnderstandEl.value) + num(maxHotsEl.value);
-      validateAllRows();
     }
     function getWeakSkills(r,u,h,mr,mu,mh) {
       const maxRecall = Number(mr);
@@ -326,33 +326,25 @@
       return tbody.querySelector(`tr.student-row[data-row-id="${rowId}"]`);
     }
     function enforceMarkLimit(inputEl, maxValue, label, options = {}) {
-      if (!inputEl) return;
+      if (!inputEl) return false;
       const notify = options.notify !== false;
       const raw = String(inputEl.value ?? "").trim();
-      if (raw === "") return;
-      let value = Number(raw);
-      if (!Number.isFinite(value)) return;
-      let changed = false;
-      if (value < 0) value = 0;
+      if (raw === "") return false;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return false;
       const safeMax = Math.max(0, Number(maxValue) || 0);
-      if (value > safeMax) {
-        value = safeMax;
-        changed = true;
-        if (notify) showQuickNotice(`لا يمكنك إدخال قيمة أكبر من ${safeMax} في ${label}`, "warn", 1900);
+      const belowZero = value < 0;
+      const exceeded = value > safeMax;
+      if (belowZero && notify && !suppressLimitNotices) {
+        showQuickNotice(`القيمة في ${label} لا يمكن أن تكون أقل من 0`, "bad", 2200);
       }
-      if (!Number.isInteger(value)) {
-        value = Math.floor(value);
-        changed = true;
+      if (exceeded && notify && !suppressLimitNotices) {
+        showQuickNotice(`القيمة في ${label} (${value}) تتجاوز الحد الأعلى ${safeMax}`, "bad", 2600);
       }
-      const nextValue = String(value);
-      if (inputEl.value !== nextValue) {
-        inputEl.value = nextValue;
-        changed = true;
-      }
-      return changed;
+      return belowZero || exceeded;
     }
     function clampRowMarksToLimits(tr, shouldNotify = false) {
-      if (!tr) return;
+      if (!tr) return false;
       const maxR = num(maxRecallEl.value);
       const maxU = num(maxUnderstandEl.value);
       const maxH = num(maxHotsEl.value);
@@ -363,19 +355,25 @@
       ];
       let exceeded = false;
       inputs.forEach((item) => {
-        const changed = enforceMarkLimit(item.el, item.max, item.label, { notify: false });
-        if (changed) exceeded = true;
+        const isExceeded = enforceMarkLimit(item.el, item.max, item.label, { notify: false });
+        if (isExceeded) exceeded = true;
       });
       if (shouldNotify && exceeded) {
-        showQuickNotice("تم ضبط القيم لتطابق الحدود المسموحة", "warn", 1900);
+        showQuickNotice("يوجد قيم متجاوزة للحدود المسموحة", "bad", 2200);
       }
+      return exceeded;
     }
     function clampAllRowsToCurrentLimits(shouldNotify = false) {
+      let exceededRows = 0;
       getStudentRows().forEach((tr) => {
-        clampRowMarksToLimits(tr, false);
+        const exceeded = clampRowMarksToLimits(tr, false);
         tr.querySelector(".recall")?.dispatchEvent(new Event("input", { bubbles: true }));
+        if (exceeded) exceededRows += 1;
       });
-      if (shouldNotify) showQuickNotice("تم تطبيق الحدود الجديدة على القيم", "info", 1700);
+      if (shouldNotify && exceededRows > 0) {
+        showQuickNotice(`يوجد ${exceededRows} سطر خارج الحدود`, "bad", 2200);
+      }
+      return exceededRows;
     }
 
     /* ── Spotlight ── */
@@ -717,10 +715,8 @@
         } else {
           const numeric = Number(normalized.replace(/,/g, "."));
           if (!Number.isFinite(numeric)) return false;
-          const max = getGridMaxForCol(colKey);
           let safe = Math.floor(numeric);
           if (safe < 0) safe = 0;
-          if (Number.isFinite(max)) safe = Math.min(safe, max);
           nextValue = String(safe);
         }
       } else if (colKey === "planInput") {
@@ -952,7 +948,13 @@
         chipSkill.className = "chip skill-chip" + (skillScale.cls ? " " + skillScale.cls : "");
         const L = computeLevel(r, u, h, mr, mu, mh);
         tr.dataset.levelText = L.txt;
-        const bad = r > mr || u > mu || h > mh;
+        const overRecall = r > mr || r < 0;
+        const overUnderstand = u > mu || u < 0;
+        const overHots = h > mh || h < 0;
+        iRecall.classList.toggle("mark-over-limit", overRecall);
+        iUnder.classList.toggle("mark-over-limit", overUnderstand);
+        iHots.classList.toggle("mark-over-limit", overHots);
+        const bad = overRecall || overUnderstand || overHots;
         tr.classList.toggle("invalid-row", bad);
         updateValidationChip();
       }
@@ -1037,6 +1039,9 @@
         tr.querySelector(".total").value = "0";
         tr.querySelector(".planInput").value = "";
         tr.dataset.levelText = "—";
+        tr.querySelector(".recall")?.classList.remove("mark-over-limit");
+        tr.querySelector(".understand")?.classList.remove("mark-over-limit");
+        tr.querySelector(".hots")?.classList.remove("mark-over-limit");
         const estimateChip = tr.querySelector(".estimate-chip");
         if (estimateChip) {
           estimateChip.textContent = "—";
@@ -1056,7 +1061,9 @@
     }
 
     function validateAllRows() {
+      suppressLimitNotices = true;
       getStudentRows().forEach((tr) => tr.querySelector(".recall").dispatchEvent(new Event("input", { bubbles: true })));
+      suppressLimitNotices = false;
     }
 
     function updateValidationChip() {
@@ -1075,7 +1082,7 @@
       if (!any) {
         validChip.textContent = "التحقق: لا توجد بيانات";
         validChip.className = "chip";
-        return;
+        return 0;
       }
       if (bad === 0) {
         validChip.innerHTML = `${iconMarkup("circle-check-big")}<span>جميع الدرجات ضمن الحدود</span>`;
@@ -1085,6 +1092,7 @@
         validChip.className = "chip bad";
       }
       renderLucideIcons();
+      return bad;
     }
     function hasTableRows() {
       return getStudentRows().length > 0;
@@ -1448,10 +1456,11 @@
       updateValidationChip();
       updateAutoFillButtonState();
       lastBatch.textContent = "—";
-      setStatus("warn","تم تفريغ الكل");
+      setStatus("warn","تم تفريغ القيم محليًا فقط","لن يتم حفظ التفريغ في قاعدة البيانات إلا بعد الضغط على إرسال البيانات");
       if (shouldReload) {
         setTimeout(() => window.location.reload(), 150);
       }
+      clearingAll = false;
     }
 
     /* ── Voice Entry ── */
@@ -1863,6 +1872,33 @@
       updateVoicePanelInfo();
     }
 
+    function trySplitVoiceCompositeNumber(numericValue, startIndex = voiceState.buffer.length) {
+      const raw = String(Math.floor(Math.abs(Number(numericValue) || 0)));
+      if (raw.length < 2) return null;
+      const digits = raw.split("").map((d) => Number(d));
+      const maxes = [num(maxRecallEl.value), num(maxUnderstandEl.value), num(maxHotsEl.value)];
+      const remainingSlots = 3 - startIndex;
+      if (digits.length > remainingSlots) return null;
+
+      for (let i = 0; i < digits.length; i += 1) {
+        const maxForSlot = Number(maxes[startIndex + i] || 0);
+        if (maxForSlot > 0 && digits[i] > maxForSlot) return null;
+      }
+      return digits;
+    }
+
+    function normalizeVoiceNumericForBuffer(numericValue) {
+      const numeric = Number(numericValue);
+      if (!Number.isFinite(numeric)) return [];
+      const rounded = Math.floor(numeric);
+      if (rounded < 10) return [rounded];
+      const maxes = [num(maxRecallEl.value), num(maxUnderstandEl.value), num(maxHotsEl.value)];
+      const currentMax = Number(maxes[voiceState.buffer.length] || 0);
+      if (currentMax > 0 && rounded <= currentMax) return [rounded];
+      const split = trySplitVoiceCompositeNumber(rounded, voiceState.buffer.length);
+      return split && split.length ? split : [rounded];
+    }
+
     function applyVoiceMarksToRow(row, values) {
       if (!row || !Array.isArray(values) || values.length !== 3) return false;
       const rInput = row.querySelector(".recall");
@@ -2014,7 +2050,7 @@
         voiceState.repeatFillTimer = null;
         const hadBufferedValues = voiceState.buffer.length > 0;
         resetVoiceBufferedMarks();
-        pushVoiceTokenPreview("clear");
+        voiceState.interimTokens = [];
         updateVoicePanelInfo();
         if (hadBufferedValues) {
           showQuickNotice("تم مسح آخر القيم المسموعة قبل الترحيل", "info", 1700);
@@ -2025,20 +2061,26 @@
       }
       const numeric = Number(normalized);
       if (!Number.isFinite(numeric)) return;
-      if (voiceState.buffer.length >= 3) {
-        clearTimeout(voiceState.repeatFillTimer);
-        voiceState.repeatFillTimer = null;
-        const now = Date.now();
-        if (!voiceState.lastOverflowNoticeAt || now - voiceState.lastOverflowNoticeAt > 1800) {
-          showQuickNotice("تم تجاهل قيمة إضافية. قل next لاعتماد الدرجات الحالية", "warn", 1800);
-          voiceState.lastOverflowNoticeAt = now;
+      const numericParts = normalizeVoiceNumericForBuffer(numeric);
+      if (!numericParts.length) return;
+
+      for (let i = 0; i < numericParts.length; i += 1) {
+        const part = numericParts[i];
+        if (voiceState.buffer.length >= 3) {
+          clearTimeout(voiceState.repeatFillTimer);
+          voiceState.repeatFillTimer = null;
+          const now = Date.now();
+          if (!voiceState.lastOverflowNoticeAt || now - voiceState.lastOverflowNoticeAt > 1800) {
+            showQuickNotice("تم تجاهل قيمة إضافية. قل next لاعتماد الدرجات الحالية", "warn", 1800);
+            voiceState.lastOverflowNoticeAt = now;
+          }
+          pushVoiceTokenPreview(String(part));
+          updateVoicePanelInfo();
+          return;
         }
-        pushVoiceTokenPreview(String(numeric));
-        updateVoicePanelInfo();
-        return;
+        pushVoiceTokenPreview(String(part));
+        voiceState.buffer.push(part);
       }
-      pushVoiceTokenPreview(String(numeric));
-      voiceState.buffer.push(numeric);
       scheduleRepeatThirdFill();
       updateVoicePanelInfo();
     }
@@ -2050,13 +2092,56 @@
       updateVoicePanelInfo();
     }
 
+    function processVoiceTokens(tokens) {
+      if (!Array.isArray(tokens) || !tokens.length) return;
+      tokens.forEach((token) => consumeVoiceToken(token));
+      updateVoicePanelInfo();
+    }
+
+    function scoreVoiceTokens(tokens) {
+      if (!Array.isArray(tokens) || !tokens.length) return -1;
+      let numericCount = 0;
+      let commandCount = 0;
+      tokens.forEach((token) => {
+        const t = String(token || "").trim().toLowerCase();
+        if (!t) return;
+        if (t === "next" || t === "clear") {
+          commandCount += 1;
+          return;
+        }
+        const n = Number(t);
+        if (Number.isFinite(n)) numericCount += 1;
+      });
+      const overflowPenalty = Math.max(0, tokens.length - 4) * 0.5;
+      return (numericCount * 3) + (commandCount * 2) - overflowPenalty;
+    }
+
+    function pickBestVoiceAlternative(result) {
+      if (!result || !result.length) return { transcript: "", tokens: [] };
+      let bestTranscript = "";
+      let bestTokens = [];
+      let bestScore = -Infinity;
+      for (let i = 0; i < result.length; i += 1) {
+        const transcript = String(result[i]?.transcript || "").trim();
+        if (!transcript) continue;
+        const tokens = filterAcceptedVoiceTokens(tokenizeVoice(transcript));
+        const score = scoreVoiceTokens(tokens);
+        if (score > bestScore) {
+          bestScore = score;
+          bestTranscript = transcript;
+          bestTokens = tokens;
+        }
+      }
+      return { transcript: bestTranscript, tokens: bestTokens };
+    }
+
     function buildVoiceRecognition() {
       if (!SpeechRecognitionCtor) return null;
       const rec = new SpeechRecognitionCtor();
       rec.lang = "ar-SA";
       rec.continuous = true;
       rec.interimResults = true;
-      rec.maxAlternatives = 1;
+      rec.maxAlternatives = 4;
       rec.onstart = () => {
         voiceState.listening = true;
         voiceState.lastProcessedResultIndex = 0;
@@ -2066,13 +2151,18 @@
         const interim = [];
         const startIndex = Math.max(event.resultIndex || 0, voiceState.lastProcessedResultIndex || 0);
         for (let i = startIndex; i < event.results.length; i += 1) {
-          const part = event.results[i][0]?.transcript || "";
+          const best = pickBestVoiceAlternative(event.results[i]);
+          const part = best.transcript || event.results[i][0]?.transcript || "";
           if (!part) continue;
           if (event.results[i].isFinal) {
-            processVoiceTranscript(part);
+            if (best.tokens.length) processVoiceTokens(best.tokens);
+            else processVoiceTranscript(part);
             voiceState.lastProcessedResultIndex = i + 1;
           } else {
-            interim.push(...filterAcceptedVoiceTokens(tokenizeVoice(part)).slice(-6));
+            const interimTokens = best.tokens.length
+              ? best.tokens
+              : filterAcceptedVoiceTokens(tokenizeVoice(part));
+            interim.push(...interimTokens.slice(-6));
           }
         }
         voiceState.interimTokens = interim.slice(-6);
@@ -2792,9 +2882,9 @@
       });
       function onClearAllClick() {
         if (clearingAll) return;
-        if(confirm("تفريغ الكل وحذف جميع البيانات المخزنة؟")) {
+        if(confirm("تفريغ الكل محليًا فقط؟ لن يتم تعديل قاعدة البيانات إلا عند الضغط على إرسال البيانات.")) {
           clearingAll = true;
-          resetAllData(true);
+          resetAllData(false);
         }
       }
       const clearBtn = $("btnClearDraft");
@@ -2817,7 +2907,11 @@
 
       [maxRecallEl,maxUnderstandEl,maxHotsEl].forEach(el=>el.addEventListener("input",()=>{
         computeTotalMax();
-        clampAllRowsToCurrentLimits(false);
+        validateAllRows();
+        const badRows = updateValidationChip();
+        if (badRows > 0) {
+          setStatus("bad", `يوجد ${badRows} سطر بقيم متجاوزة للحد الأعلى`, "تم تلوين القيم المتجاوزة بالأحمر دون تعديلها");
+        }
         scheduleDraftSave();
       }));
       [teacherSel,gradeSel,sectionSel,subjectSel,examSel].forEach(s=>{
@@ -3635,6 +3729,108 @@
         box.style.display = message ? 'flex' : 'none';
       }
 
+      function buildBackupFileName() {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        return `yubla-system-backup-${stamp}.json`;
+      }
+
+      function downloadBackupToDevice(backup) {
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = buildBackupFileName();
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      async function exportSystemBackup() {
+        if (window.__superBackupExportInFlight) return;
+        window.__superBackupExportInFlight = true;
+        const backupExportBtn = document.getElementById('superBackupExportBtn');
+        try {
+          if (backupExportBtn) backupExportBtn.disabled = true;
+          startLoading('جارٍ إنشاء النسخة الاحتياطية...');
+          const response = await api('/api/v1/super/system/backup/export');
+          const backup = response?.backup;
+          if (!backup || typeof backup !== 'object') throw new Error('تعذر إنشاء ملف النسخة الاحتياطية');
+          downloadBackupToDevice(backup);
+          const counts = response?.backup?.counts || {};
+          showImportResult(
+            `تم تنزيل النسخة الاحتياطية | مدارس: ${counts.tenants ?? 0} | حسابات: ${counts.users ?? 0} | طالبات: ${counts.students ?? 0} | سجلات: ${counts.submissions ?? 0}`,
+            'ok'
+          );
+          succeed('تم تنزيل النسخة الاحتياطية');
+        } catch (error) {
+          fail(error.message || 'تعذر إنشاء النسخة الاحتياطية');
+        } finally {
+          window.__superBackupExportInFlight = false;
+          if (backupExportBtn) backupExportBtn.disabled = false;
+        }
+      }
+
+      async function restoreSystemBackupFromFile(fileInput) {
+        const file = fileInput?.files?.[0];
+        if (!file) {
+          fail('يرجى اختيار ملف نسخة احتياطية أولاً');
+          return;
+        }
+
+        const yes = confirm('سيتم استبدال بيانات المدارس الحالية من ملف النسخة. هل تريد المتابعة؟');
+        if (!yes) {
+          fileInput.value = '';
+          return;
+        }
+
+        const passwordInput = prompt('للتأكيد النهائي، أدخل كلمة مرور حسابك الحالي');
+        if (passwordInput === null) {
+          fileInput.value = '';
+          return;
+        }
+        const password = cleanInput(passwordInput);
+        if (!password) {
+          fileInput.value = '';
+          fail('لم يتم إدخال كلمة المرور. تم إلغاء العملية');
+          return;
+        }
+
+        try {
+          const fileText = await file.text();
+          let backup;
+          try {
+            backup = JSON.parse(fileText);
+          } catch (_) {
+            throw new Error('ملف النسخة غير صالح (JSON)');
+          }
+
+          const isPasswordValid = await verifyCurrentUserPassword(password);
+          if (!isPasswordValid) {
+            throw new Error('كلمة المرور غير صحيحة. تم إلغاء العملية');
+          }
+
+          startLoading('جارٍ استعادة النسخة الاحتياطية...');
+          const response = await api('/api/v1/super/system/backup/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirm: true, backup })
+          });
+
+          const report = response?.report || {};
+          showImportResult(
+            `تمت الاستعادة بنجاح | مدارس: ${report.tenants ?? 0} | حسابات: ${report.users ?? 0} | طالبات: ${report.students ?? 0} | سجلات: ${report.submissions ?? 0}`,
+            'ok'
+          );
+          fileInput.value = '';
+          await loadData();
+          succeed('تمت استعادة النسخة بنجاح');
+        } catch (error) {
+          fileInput.value = '';
+          fail(error.message || 'تعذر استعادة النسخة');
+        }
+      }
+
       let xlsxLibPromise = null;
       function ensureXlsxLib() {
         if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -3773,6 +3969,14 @@
 
         const refreshBtn = document.getElementById('superRefreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', loadData);
+        const backupExportBtn = document.getElementById('superBackupExportBtn');
+        if (backupExportBtn) backupExportBtn.addEventListener('click', () => exportSystemBackup());
+        const backupRestoreBtn = document.getElementById('superBackupRestoreBtn');
+        const backupRestoreFile = document.getElementById('superBackupRestoreFile');
+        if (backupRestoreBtn && backupRestoreFile) {
+          backupRestoreBtn.addEventListener('click', () => backupRestoreFile.click());
+          backupRestoreFile.addEventListener('change', () => restoreSystemBackupFromFile(backupRestoreFile));
+        }
         const dedupeSubmissionsBtn = document.getElementById('superDedupeSubmissionsBtn');
         if (dedupeSubmissionsBtn) {
           dedupeSubmissionsBtn.addEventListener('click', async () => {
