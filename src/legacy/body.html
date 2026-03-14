@@ -67,12 +67,12 @@
               <select id="af-level">
                 <option value="">— الكل —</option>
                 <option value="لا يوجد ضعف">لا يوجد ضعف</option>
-                <option value="ضعف في التذكر">ضعف في التذكر</option>
-                <option value="ضعف في الفهم">ضعف في الفهم</option>
+                <option value="ضعف في المعرفة والتذكر">ضعف في المعرفة والتذكر</option>
+                <option value="ضعف في الفهم والتحليل">ضعف في الفهم والتحليل</option>
                 <option value="ضعف في المهارات العليا">ضعف في المهارات العليا</option>
-                <option value="ضعف في التذكر والفهم">ضعف في التذكر والفهم</option>
-                <option value="ضعف في التذكر والمهارات العليا">ضعف في التذكر والمهارات العليا</option>
-                <option value="ضعف في الفهم والمهارات العليا">ضعف في الفهم والمهارات العليا</option>
+                <option value="ضعف في المعرفة والتذكر والفهم والتحليل">ضعف في المعرفة والتذكر والفهم والتحليل</option>
+                <option value="ضعف في المعرفة والتذكر والمهارات العليا">ضعف في المعرفة والتذكر والمهارات العليا</option>
+                <option value="ضعف في الفهم والتحليل والمهارات العليا">ضعف في الفهم والتحليل والمهارات العليا</option>
                 <option value="ضعف عام">ضعف عام في جميع المهارات</option>
               </select>
             </div>
@@ -118,13 +118,13 @@
             <div class="stat-card" id="sc-avg-recall-card">
               <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
               <div class="stat-val" id="sc-avg-recall">—</div>
-              <div class="stat-lbl">متوسط التذكر</div>
+              <div class="stat-lbl">متوسط المعرفة والتذكر</div>
               <div class="stat-sub" id="sc-avg-recall-sub">—</div>
             </div>
             <div class="stat-card" id="sc-avg-understand-card">
               <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
               <div class="stat-val" id="sc-avg-understand">—</div>
-              <div class="stat-lbl">متوسط الفهم</div>
+              <div class="stat-lbl">متوسط الفهم والتحليل</div>
               <div class="stat-sub" id="sc-avg-understand-sub">—</div>
             </div>
             <div class="stat-card" id="sc-avg-hots-card">
@@ -148,13 +148,13 @@
             <div class="stat-card warn-card" id="sc-weak-recall-card">
               <div class="stat-icon"><i data-lucide="brain" aria-hidden="true"></i></div>
               <div class="stat-val" id="sc-weak-recall">—</div>
-              <div class="stat-lbl">ضعف في التذكر</div>
+              <div class="stat-lbl">ضعف في المعرفة والتذكر</div>
               <div class="stat-sub" id="sc-weak-recall-pct">—% من الإجمالي</div>
             </div>
             <div class="stat-card warn-card" id="sc-weak-understand-card">
               <div class="stat-icon"><i data-lucide="lightbulb" aria-hidden="true"></i></div>
               <div class="stat-val" id="sc-weak-understand">—</div>
-              <div class="stat-lbl">ضعف في الفهم</div>
+              <div class="stat-lbl">ضعف في الفهم والتحليل</div>
               <div class="stat-sub" id="sc-weak-understand-pct">—% من الإجمالي</div>
             </div>
             <div class="stat-card warn-card" id="sc-weak-hots-card">
@@ -214,8 +214,8 @@
                 <th>الصف / الشعبة</th>
                 <th>المادة</th>
                 <th>الامتحان</th>
-                <th>التذكر</th>
-                <th>الفهم</th>
+                <th>المعرفة والتذكر</th>
+                <th>الفهم والتحليل</th>
                 <th>المهارات العليا</th>
                 <th>المجموع</th>
                 <th>التقدير</th>
@@ -250,6 +250,7 @@
         </div>
         <div class="super-topbar-right">
           <button class="info with-icon" id="superRefreshBtn"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>تحديث البيانات</span></button>
+          <button class="accent with-icon" id="superDedupeSubmissionsBtn"><i data-lucide="sparkles" aria-hidden="true"></i><span>تنظيف تكرار العلامات</span></button>
           <button class="danger with-icon" id="superResetSchoolsBtn"><i data-lucide="trash-2" aria-hidden="true"></i><span>مسح جميع بيانات المدارس</span></button>
         </div>
       </div>
@@ -509,11 +510,11 @@
           <div class="f6">&nbsp;</div>
 
           <div class="f3">
-            <label>الحد الأعلى — التذكر</label>
+            <label>الحد الأعلى — المعرفة والتذكر</label>
             <input type="number" id="maxRecall" min="0" step="1" value="10" />
           </div>
           <div class="f3">
-            <label>الحد الأعلى — الفهم</label>
+            <label>الحد الأعلى — الفهم والتحليل</label>
             <input type="number" id="maxUnderstand" min="0" step="1" value="5" />
           </div>
           <div class="f3">
@@ -573,8 +574,8 @@
               <tr>
                 <th class="row-num">SN</th>
                 <th style="min-width:220px;">اسم الطالبة</th>
-                <th class="num-cell">التذكر</th>
-                <th class="num-cell">الفهم</th>
+                <th class="num-cell">المعرفة والتذكر</th>
+                <th class="num-cell">الفهم والتحليل</th>
                 <th class="num-cell">المهارات العليا</th>
                 <th class="total-cell">المجموع</th>
                 <th style="min-width:90px;">التقدير</th>
@@ -620,8 +621,8 @@
       <table class="voice-values-table">
         <thead>
           <tr>
-            <th>التذكر</th>
-            <th>الفهم</th>
+            <th>المعرفة والتذكر</th>
+            <th>الفهم والتحليل</th>
             <th>المهارات العليا</th>
           </tr>
         </thead>
@@ -678,13 +679,13 @@
         <div class="info-row">
           <div class="info-row-title">للأمور الإدارية</div>
           <div class="info-row-text">مديرة مدرسة يبلا الثانوية الشاملة للبنات: الطاف العلي</div>
-          <div class="info-row-text">هاتف: 0790003344</div>
+          <div class="info-row-text">هاتف: 0799695521</div>
         </div>
         <div class="section-divider" style="margin:10px 0;"></div>
         <div class="info-row">
           <div class="info-row-title">للأمور التقنية</div>
           <div class="info-row-text">معلمة الفيزياء بمدرسة يبلا الثانوية الشاملة للبنات : سجود العزام</div>
-          <div class="info-row-text">هاتف: 0790001122</div>
+          <div class="info-row-text">Email : sujoodalazzam@gmail.com</div>
         </div>
       </div>
       <div class="modal-actions">
@@ -756,4 +757,5 @@
       </div>
     </div>
   </div>
+
 

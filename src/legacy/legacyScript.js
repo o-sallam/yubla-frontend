@@ -208,8 +208,8 @@
       const maxHots = Number(mh);
       if (!(maxRecall > 0) || !(maxUnderstand > 0) || !(maxHots > 0)) return null;
       const skills = [
-        { label: "التذكر", score: Number(r) || 0, max: maxRecall },
-        { label: "الفهم", score: Number(u) || 0, max: maxUnderstand },
+        { label: "المعرفة والتذكر", score: Number(r) || 0, max: maxRecall },
+        { label: "الفهم والتحليل", score: Number(u) || 0, max: maxUnderstand },
         { label: "المهارات العليا", score: Number(h) || 0, max: maxHots }
       ];
       return skills
@@ -234,13 +234,13 @@
       const key = weakSkills.join("|");
       const map = {
         "": { code: 1, txt: "لا يوجد ضعف", cls: "ok" },
-        "التذكر": { code: 2, txt: "ضعف في التذكر", cls: "warn" },
-        "الفهم": { code: 3, txt: "ضعف في الفهم", cls: "warn" },
+        "المعرفة والتذكر": { code: 2, txt: "ضعف في المعرفة والتذكر", cls: "warn" },
+        "الفهم والتحليل": { code: 3, txt: "ضعف في الفهم والتحليل", cls: "warn" },
         "المهارات العليا": { code: 4, txt: "ضعف في المهارات العليا", cls: "warn" },
-        "التذكر|الفهم": { code: 5, txt: "ضعف في التذكر والفهم", cls: "bad" },
-        "التذكر|المهارات العليا": { code: 6, txt: "ضعف في التذكر والمهارات العليا", cls: "bad" },
-        "الفهم|المهارات العليا": { code: 7, txt: "ضعف في الفهم والمهارات العليا", cls: "bad" },
-        "التذكر|الفهم|المهارات العليا": { code: 8, txt: "ضعف عام في جميع المهارات", cls: "bad" }
+        "المعرفة والتذكر|الفهم والتحليل": { code: 5, txt: "ضعف في المعرفة والتذكر والفهم والتحليل", cls: "bad" },
+        "المعرفة والتذكر|المهارات العليا": { code: 6, txt: "ضعف في المعرفة والتذكر والمهارات العليا", cls: "bad" },
+        "الفهم والتحليل|المهارات العليا": { code: 7, txt: "ضعف في الفهم والتحليل والمهارات العليا", cls: "bad" },
+        "المعرفة والتذكر|الفهم والتحليل|المهارات العليا": { code: 8, txt: "ضعف عام في جميع المهارات", cls: "bad" }
       };
       return map[key] || { code: "—", txt: "—", cls: "" };
     }
@@ -357,8 +357,8 @@
       const maxU = num(maxUnderstandEl.value);
       const maxH = num(maxHotsEl.value);
       const inputs = [
-        { el: tr.querySelector(".recall"), max: maxR, label: "التذكر" },
-        { el: tr.querySelector(".understand"), max: maxU, label: "الفهم" },
+        { el: tr.querySelector(".recall"), max: maxR, label: "المعرفة والتذكر" },
+        { el: tr.querySelector(".understand"), max: maxU, label: "الفهم والتحليل" },
         { el: tr.querySelector(".hots"), max: maxH, label: "المهارات العليا" }
       ];
       let exceeded = false;
@@ -938,8 +938,8 @@
       }
 
       function recompute() {
-        enforceMarkLimit(iRecall, num(maxRecallEl.value), "التذكر", { notify: false });
-        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم", { notify: false });
+        enforceMarkLimit(iRecall, num(maxRecallEl.value), "المعرفة والتذكر", { notify: false });
+        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم والتحليل", { notify: false });
         enforceMarkLimit(iHots, num(maxHotsEl.value), "المهارات العليا", { notify: false });
         const r = num(iRecall.value), u = num(iUnder.value), h = num(iHots.value);
         iTotal.value = r + u + h;
@@ -975,12 +975,12 @@
         if (spotlight.classList.contains("visible")) showSpotlight(iName.value, getRowSn());
       });
       iRecall.addEventListener("input", () => {
-        enforceMarkLimit(iRecall, num(maxRecallEl.value), "التذكر");
+        enforceMarkLimit(iRecall, num(maxRecallEl.value), "المعرفة والتذكر");
         recompute();
         scheduleDraftSave();
       });
       iUnder.addEventListener("input", () => {
-        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم");
+        enforceMarkLimit(iUnder, num(maxUnderstandEl.value), "الفهم والتحليل");
         recompute();
         scheduleDraftSave();
       });
@@ -1334,8 +1334,8 @@
         if(fillEmpty) { if(r==="")r="0"; if(u==="")u="0"; if(h==="")h="0"; }
         else { if(r===""||u===""||h==="") throw new Error(`يرجى تعبئة علامات الطالبة: ${n}`); }
         const rn=num(r),un=num(u),hn=num(h);
-        if(rn>mr) throw new Error(`تجاوز حد التذكر: ${n}`);
-        if(un>mu) throw new Error(`تجاوز حد الفهم: ${n}`);
+        if(rn>mr) throw new Error(`تجاوز حد المعرفة والتذكر: ${n}`);
+        if(un>mu) throw new Error(`تجاوز حد الفهم والتحليل: ${n}`);
         if(hn>mh) throw new Error(`تجاوز حد المهارات: ${n}`);
         const L=computeLevel(rn,un,hn,mr,mu,mh);
         if(!fillEmpty&&isWeakLevel(L.txt)&&(plan.length<1||plan.length>30))
@@ -1723,11 +1723,11 @@
         Math.max(0, Number(values[2]) || 0)
       ];
       if (numericValues[0] > maxR) {
-        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة التذكر (${numericValues[0]}) تجاوزت الحد المسموح ${maxR}`);
+        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة المعرفة والتذكر (${numericValues[0]}) تجاوزت الحد المسموح ${maxR}`);
         return false;
       }
       if (numericValues[1] > maxU) {
-        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة الفهم (${numericValues[1]}) تجاوزت الحد المسموح ${maxU}`);
+        notifyVoiceRejected(`لم يتم قبول القيم لأن قيمة الفهم والتحليل (${numericValues[1]}) تجاوزت الحد المسموح ${maxU}`);
         return false;
       }
       if (numericValues[2] > maxH) {
@@ -2270,8 +2270,8 @@
             <tr>
               <th>SN</th>
               <th>اسم الطالبة</th>
-              <th>التذكر</th>
-              <th>الفهم</th>
+              <th>المعرفة والتذكر</th>
+              <th>الفهم والتحليل</th>
               <th>المهارات العليا</th>
               <th>المجموع</th>
               <th>التقدير</th>
@@ -2642,8 +2642,8 @@
           if (weakSkills.length === 0) {
             noWeak += 1;
           } else {
-            if (weakSkills.includes("التذكر")) weakRecall += 1;
-            if (weakSkills.includes("الفهم")) weakUnderstand += 1;
+            if (weakSkills.includes("المعرفة والتذكر")) weakRecall += 1;
+            if (weakSkills.includes("الفهم والتحليل")) weakUnderstand += 1;
             if (weakSkills.includes("المهارات العليا")) weakHots += 1;
           }
           if (weakSkills.length === 1) weakOne += 1;
@@ -3369,6 +3369,41 @@
 
         const refreshBtn = document.getElementById('superRefreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', loadData);
+        const dedupeSubmissionsBtn = document.getElementById('superDedupeSubmissionsBtn');
+        if (dedupeSubmissionsBtn) {
+          dedupeSubmissionsBtn.addEventListener('click', async () => {
+            const yes = confirm('هل تريد حذف جميع سجلات العلامات المكررة (نفس المعلمة/الصف/الشعبة/المادة/الاختبار/اسم الطالبة)؟ سيتم الإبقاء على أحدث سجل فقط.');
+            if (!yes) return;
+            const passwordInput = prompt('للتأكيد النهائي، أدخل كلمة مرور حسابك الحالي');
+            if (passwordInput === null) return;
+            const password = cleanInput(passwordInput);
+            if (!password) {
+              fail('لم يتم إدخال كلمة المرور. تم إلغاء العملية');
+              return;
+            }
+            try {
+              const isPasswordValid = await verifyCurrentUserPassword(password);
+              if (!isPasswordValid) {
+                fail('كلمة المرور غير صحيحة. تم إلغاء العملية');
+                return;
+              }
+              startLoading('جارٍ تنظيف سجلات العلامات المكررة...');
+              const response = await api('/api/v1/super/system/dedupe-submissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true })
+              });
+              const report = response?.report || {};
+              showImportResult(
+                `تم تنظيف التكرار | قبل التنظيف: ${report.duplicatesBefore ?? 0} | المحذوف: ${report.deleted ?? 0} | المتبقي: ${report.totalAfter ?? 0}`,
+                'ok'
+              );
+              await loadData();
+            } catch (error) {
+              fail(error.message || 'تعذر تنظيف سجلات العلامات المكررة');
+            }
+          });
+        }
         const resetSchoolsBtn = document.getElementById('superResetSchoolsBtn');
         if (resetSchoolsBtn) {
           resetSchoolsBtn.addEventListener('click', async () => {
@@ -3771,6 +3806,7 @@
 
 
     boot();
+
 
 
 
