@@ -204,14 +204,17 @@
             <input type="text" id="adminSearch" placeholder="بحث بالاسم…" />
           </div>
         </div>
-        <div class="admin-table-scroll">
+        <div class="admin-table-top-scroll is-hidden" id="adminTableTopScroll" aria-hidden="true">
+          <div class="admin-table-top-scroll-inner" id="adminTableTopScrollInner"></div>
+        </div>
+        <div class="admin-table-scroll" id="adminTableScroll">
           <table class="admin-table">
             <thead>
               <tr>
                 <th>#</th>
                 <th>اسم الطالبة</th>
-                <th>المعلمة</th>
-                <th>الصف / الشعبة</th>
+                <th class="admin-col-teacher">المعلمة</th>
+                <th class="admin-col-grade-section">الصف / الشعبة</th>
                 <th>المادة</th>
                 <th>الامتحان</th>
                 <th>المعرفة والتذكر</th>

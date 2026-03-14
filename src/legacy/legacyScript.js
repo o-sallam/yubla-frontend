@@ -724,7 +724,7 @@
           nextValue = String(safe);
         }
       } else if (colKey === "planInput") {
-        nextValue = String(nextValue || "").slice(0, 30);
+        nextValue = String(nextValue || "").slice(0, 36);
       }
       if (input.value === nextValue) return true;
       input.value = nextValue;
@@ -917,7 +917,7 @@
         <td class="total-cell"><input type="number" class="total" readonly value="${esc(data.total ?? 0)}"/></td>
         <td><span class="chip estimate-chip">—</span></td>
         <td><span class="chip skill-chip">—</span></td>
-        <td class="plan-cell"><input type="text" class="planInput" data-grid-col="planInput" value="${esc(data.plan || "")}" placeholder="خطة علاجية (1–30 حرف)" maxlength="30"/></td>
+        <td class="plan-cell"><input type="text" class="planInput" data-grid-col="planInput" value="${esc(data.plan || "")}" placeholder="خطة علاجية (1–36 حرف)" maxlength="36"/></td>
       `;
 
       const iName = tr.querySelector(".studentName");
@@ -1338,8 +1338,8 @@
         if(un>mu) throw new Error(`تجاوز حد الفهم والتحليل: ${n}`);
         if(hn>mh) throw new Error(`تجاوز حد المهارات: ${n}`);
         const L=computeLevel(rn,un,hn,mr,mu,mh);
-        if(!fillEmpty&&isWeakLevel(L.txt)&&(plan.length<1||plan.length>30))
-          throw new Error(`الطالبة "${n}" — ${L.txt}، يجب إدخال خطة علاجية (1–30 حرف)`);
+        if(!fillEmpty&&isWeakLevel(L.txt)&&(plan.length<1||plan.length>36))
+          throw new Error(`الطالبة "${n}" — ${L.txt}، يجب إدخال خطة علاجية (1–36 حرف)`);
         rows.push({studentName:n,recall:rn,understand:un,hots:hn,plan});
       }
       if(rows.length===0) throw new Error("لا توجد طالبات للإرسال.");
@@ -1455,30 +1455,92 @@
     }
 
     /* ── Voice Entry ── */
+    const VOICE_MIN_RECOGNIZED_MARK = 1;
+    const VOICE_MAX_RECOGNIZED_MARK = 50;
     const voiceNumberMap = {
-      "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
-      zero: 0, oh: 0, o: 0,
+      "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
       one: 1,
-      two: 2, to: 2, too: 2,
+      two: 2,
       three: 3,
-      four: 4, for: 4,
+      four: 4,
       five: 5,
       six: 6,
       seven: 7,
-      eight: 8, ate: 8,
+      eight: 8,
       nine: 9,
       ten: 10,
-      صفر: 0, زيرو: 0,
+      eleven: 11,
+      twelve: 12,
+      thirteen: 13,
+      fourteen: 14, forteen: 14,
+      fifteen: 15,
+      sixteen: 16,
+      seventeen: 17,
+      eighteen: 18,
+      nineteen: 19,
+      twenty: 20,
+      thirty: 30,
+      forty: 40, fourty: 40,
+      fifty: 50,
       واحد: 1, واحده: 1, اول: 1, ون: 1,
-      اثنين: 2, اثنان: 2, اتنين: 2, تنين: 2, ثنين: 2, تو: 2,
+      اثنين: 2, اثنان: 2, اتنين: 2, تنين: 2, ثنين: 2, تو: 2, توو: 2,
       ثلاثه: 3, ثلاث: 3, تلاته: 3, ثري: 3,
-      اربعه: 4, اربع: 4, فور: 4, فق: 4, فوك: 4, فوق: 4,
+      اربعه: 4, اربع: 4, فور: 4,
       خمسه: 5, خمس: 5, فايف: 5,
       سته: 6, ست: 6, سكس: 6,
       سبعه: 7, سبع: 7, سيفن: 7,
       ثمانيه: 8, ثماني: 8, ثمان: 8, ايت: 8,
       تسعه: 9, تسع: 9, ناين: 9,
-      عشره: 10, عشر: 10
+      عشره: 10, عشر: 10,
+      احدىعشر: 11, احدعشر: 11, حداشر: 11,
+      اثناعشر: 12, اثنيعشر: 12, اتناعشر: 12, اثناشر: 12, اتناشر: 12,
+      ثلاثعشر: 13, ثلاثتعشر: 13, تلاتعشر: 13, تلتعشر: 13, تلتاشر: 13,
+      اربععشر: 14, اربعتعشر: 14, اربعتاشر: 14, اربعتاش: 14,
+      خمسعشر: 15, خمستعشر: 15, خمستاشر: 15,
+      ستعشر: 16, ستتعشر: 16, ستاشر: 16,
+      سبععشر: 17, سبعتعشر: 17, سبعتاشر: 17,
+      ثمانعشر: 18, ثمانتعشر: 18, ثمنتعشر: 18, ثمنتاشر: 18,
+      تسععشر: 19, تسعتعشر: 19, تسعتاشر: 19,
+      عشرين: 20, عشرون: 20, تونتي: 20,
+      ثلاثين: 30, ثلاثون: 30,
+      اربعين: 40, اربعون: 40,
+      خمسين: 50, خمسون: 50
+    };
+    const voiceEnglishUnitMap = {
+      one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+      ون: 1, تو: 2, ثري: 3, فور: 4, فايف: 5, سكس: 6, سيفن: 7, ايت: 8, ناين: 9
+    };
+    const voiceEnglishTensMap = {
+      twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50,
+      تونتي: 20, توني: 20, ثيرتي: 30, فورتي: 40, فورتيي: 40, فيفتي: 50
+    };
+    const voiceArabicUnitMap = {
+      واحد: 1, واحده: 1, اول: 1, ون: 1,
+      اثنين: 2, اثنان: 2, اتنين: 2, تنين: 2, ثنين: 2,
+      ثلاثه: 3, ثلاث: 3, تلاته: 3,
+      اربعه: 4, اربع: 4,
+      خمسه: 5, خمس: 5,
+      سته: 6, ست: 6,
+      سبعه: 7, سبع: 7,
+      ثمانيه: 8, ثماني: 8, ثمان: 8,
+      تسعه: 9, تسع: 9
+    };
+    const voiceArabicTeenLeadMap = {
+      احد: 1, احدى: 1, واحد: 1, واحده: 1,
+      اثنا: 2, اثني: 2, اثنان: 2, اثنين: 2, اتنين: 2,
+      ثلاثه: 3, ثلاث: 3, تلاته: 3,
+      اربعه: 4, اربع: 4,
+      خمسه: 5, خمس: 5,
+      سته: 6, ست: 6,
+      سبعه: 7, سبع: 7,
+      ثمانيه: 8, ثماني: 8, ثمان: 8,
+      تسعه: 9, تسع: 9
+    };
+    const voiceArabicTensMap = {
+      عشرين: 20, عشرون: 20,
+      ثلاثين: 30, ثلاثون: 30,
+      اربعين: 40, اربعون: 40,
+      خمسين: 50, خمسون: 50
     };
     const voiceCommandMap = {
       next: "next",
@@ -1486,7 +1548,11 @@
       "نيكست": "next",
       "التالي": "next",
       "التاليه": "next",
-      "بعده": "next"
+      "بعده": "next",
+      clear: "clear",
+      "كلير": "clear",
+      "مسح": "clear",
+      "امسح": "clear"
     };
     function normalizeVoiceText(value) {
       return String(value || "")
@@ -1637,31 +1703,119 @@
       }
     }
 
+    function isVoiceMarkInRange(value) {
+      return Number.isInteger(value) && value >= VOICE_MIN_RECOGNIZED_MARK && value <= VOICE_MAX_RECOGNIZED_MARK;
+    }
+
+    function stripArabicWaw(token) {
+      if (!token || token === "و") return token || "";
+      if (token.startsWith("و") && token.length > 1) return token.slice(1);
+      return token;
+    }
+
+    function parseSingleVoiceNumberToken(token) {
+      const value = normalizeVoiceText(token);
+      if (!value) return null;
+      if (/^\d+$/.test(value)) {
+        const numeric = Number(value);
+        return isVoiceMarkInRange(numeric) ? numeric : null;
+      }
+      const mapped = Object.prototype.hasOwnProperty.call(voiceNumberMap, value)
+        ? voiceNumberMap[value]
+        : null;
+      if (mapped === null || mapped === undefined) return null;
+      return isVoiceMarkInRange(mapped) ? mapped : null;
+    }
+
+    function parseVoiceNumberSequence(tokens, startIndex) {
+      const t0 = normalizeVoiceText(tokens[startIndex] || "");
+      if (!t0) return null;
+
+      const t1 = normalizeVoiceText(tokens[startIndex + 1] || "");
+      const t2 = normalizeVoiceText(tokens[startIndex + 2] || "");
+      const t1NoW = stripArabicWaw(t1);
+      const t2NoW = stripArabicWaw(t2);
+
+      const enTens = voiceEnglishTensMap[t0];
+      if (Number.isInteger(enTens)) {
+        if (t1 === "and" && Number.isInteger(voiceEnglishUnitMap[t2])) {
+          const combo = enTens + voiceEnglishUnitMap[t2];
+          if (isVoiceMarkInRange(combo)) return { value: combo, consumed: 3 };
+        }
+        if (Number.isInteger(voiceEnglishUnitMap[t1])) {
+          const combo = enTens + voiceEnglishUnitMap[t1];
+          if (isVoiceMarkInRange(combo)) return { value: combo, consumed: 2 };
+        }
+        if (isVoiceMarkInRange(enTens)) return { value: enTens, consumed: 1 };
+      }
+
+      const arTensDirect = voiceArabicTensMap[t0];
+      if (Number.isInteger(arTensDirect)) {
+        if (Number.isInteger(voiceArabicUnitMap[t1NoW])) {
+          const combo = arTensDirect + voiceArabicUnitMap[t1NoW];
+          if (isVoiceMarkInRange(combo)) return { value: combo, consumed: 2 };
+        }
+        if (isVoiceMarkInRange(arTensDirect)) return { value: arTensDirect, consumed: 1 };
+      }
+
+      const arUnit = voiceArabicUnitMap[t0];
+      if (Number.isInteger(arUnit)) {
+        if (t1NoW === "عشر" || t1NoW === "عشره") {
+          const teen = 10 + arUnit;
+          if (isVoiceMarkInRange(teen)) return { value: teen, consumed: 2 };
+        }
+
+        if (t1 === "و" && Number.isInteger(voiceArabicTensMap[t2NoW])) {
+          const combo = voiceArabicTensMap[t2NoW] + arUnit;
+          if (isVoiceMarkInRange(combo)) return { value: combo, consumed: 3 };
+        }
+        if (Number.isInteger(voiceArabicTensMap[t1NoW])) {
+          const combo = voiceArabicTensMap[t1NoW] + arUnit;
+          if (isVoiceMarkInRange(combo)) return { value: combo, consumed: 2 };
+        }
+      }
+
+      const arTeenLead = voiceArabicTeenLeadMap[t0];
+      if (Number.isInteger(arTeenLead) && (t1NoW === "عشر" || t1NoW === "عشره")) {
+        const teen = 10 + arTeenLead;
+        if (isVoiceMarkInRange(teen)) return { value: teen, consumed: 2 };
+      }
+
+      const single = parseSingleVoiceNumberToken(t0);
+      if (single !== null) return { value: single, consumed: 1 };
+
+      return null;
+    }
+
     function normalizeVoiceToken(token) {
       const value = normalizeVoiceText(token);
       if (!value) return null;
       if (voiceCommandMap[value]) return voiceCommandMap[value];
+      if (value.includes("clear") || value.includes("كلير")) return "clear";
       if (value.includes("next") || value.includes("نكست") || value.includes("نيكست")) return "next";
-      if (/^\d+$/.test(value)) {
-        if (value.length > 1 && value !== "10") return value.split("");
-        const numericValue = Number(value);
-        if (Number.isInteger(numericValue) && numericValue >= 0 && numericValue <= 10) {
-          return String(numericValue);
-        }
-      }
-      const numeric = Object.prototype.hasOwnProperty.call(voiceNumberMap, value)
-        ? voiceNumberMap[value]
-        : null;
+      const numeric = parseSingleVoiceNumberToken(value);
       if (numeric === null || numeric === undefined) return null;
       return String(numeric);
     }
 
     function filterAcceptedVoiceTokens(tokens) {
-      return (tokens || []).flatMap((token) => {
-        const normalized = normalizeVoiceToken(token);
-        if (!normalized) return [];
-        return Array.isArray(normalized) ? normalized : [normalized];
-      });
+      const rawTokens = (tokens || []).map((token) => normalizeVoiceText(token)).filter(Boolean);
+      const accepted = [];
+      for (let i = 0; i < rawTokens.length; i += 1) {
+        const normalized = normalizeVoiceToken(rawTokens[i]);
+        if (normalized === "next" || normalized === "clear") {
+          accepted.push(normalized);
+          continue;
+        }
+        const sequence = parseVoiceNumberSequence(rawTokens, i);
+        if (sequence) {
+          accepted.push(String(sequence.value));
+          i += sequence.consumed - 1;
+          continue;
+        }
+        if (normalized) accepted.push(normalized);
+      }
+      return accepted;
     }
 
     function tokenizeVoice(text) {
@@ -1853,6 +2007,20 @@
           return;
         }
         commitVoiceBufferedMarks();
+        return;
+      }
+      if (normalized === "clear") {
+        clearTimeout(voiceState.repeatFillTimer);
+        voiceState.repeatFillTimer = null;
+        const hadBufferedValues = voiceState.buffer.length > 0;
+        resetVoiceBufferedMarks();
+        pushVoiceTokenPreview("clear");
+        updateVoicePanelInfo();
+        if (hadBufferedValues) {
+          showQuickNotice("تم مسح آخر القيم المسموعة قبل الترحيل", "info", 1700);
+        } else {
+          showQuickNotice("لا توجد قيم صوتية قيد الإدخال لمسحها", "warn", 1400);
+        }
         return;
       }
       const numeric = Number(normalized);
@@ -2142,6 +2310,10 @@
         skillMeasure,
         level,
         plan,
+        maxRecall: Number(r?.maxRecall || 0),
+        maxUnderstand: Number(r?.maxUnderstand || 0),
+        maxHots: Number(r?.maxHots || 0),
+        totalMax,
         hasPlan: !!plan,
         isWeak: Number.isFinite(skillCode) ? skillCode > 1 : isWeakLevel(level),
         hasMissing: recall === "" || understand === "" || hots === "",
@@ -2221,6 +2393,10 @@
             skillMeasure,
             level,
             plan,
+            maxRecall: mr,
+            maxUnderstand: mu,
+            maxHots: mh,
+            totalMax: mr + mu + mh,
             hasPlan: !!plan,
             isWeak: Number.isFinite(skillCode) ? skillCode > 1 : isWeakLevel(level),
             hasMissing: recall === "" || understand === "" || hots === "",
@@ -2285,24 +2461,147 @@
     }
 
     function renderPrintSummary(rows) {
+      if (!rows.length) return `<div class="print-empty">لا توجد بيانات متاحة لهذا الخيار.</div>`;
+
       const total = rows.length;
-      const missing = rows.filter((r) => r.hasMissing).length;
-      const entered = total - missing;
-      const weak = rows.filter((r) => r.isWeak).length;
-      const plans = rows.filter((r) => r.hasPlan).length;
-      const totals = rows.map((r) => Number(r.total || 0)).filter((v) => Number.isFinite(v) && v > 0);
-      const avgTotal = totals.length ? (totals.reduce((a, b) => a + b, 0) / totals.length).toFixed(2) : "0.00";
+      const passThresholdPct = 50;
+      let entered = 0;
+      let missing = 0;
+      let pass = 0;
+      let fail = 0;
+      let plans = 0;
+      let sumTotalPct = 0;
+      let totalPctCount = 0;
+      let sumRecallPct = 0;
+      let sumUnderstandPct = 0;
+      let sumHotsPct = 0;
+      let recallPctCount = 0;
+      let understandPctCount = 0;
+      let hotsPctCount = 0;
+      let noWeak = 0;
+      let weakRecall = 0;
+      let weakUnderstand = 0;
+      let weakHots = 0;
+      let weakOne = 0;
+      let weakTwo = 0;
+      let weakAll = 0;
+
+      rows.forEach((r) => {
+        const recall = Number(r.recall || 0);
+        const understand = Number(r.understand || 0);
+        const hots = Number(r.hots || 0);
+        const totalScore = Number(r.total || 0);
+        const maxRecall = Number(r.maxRecall || 0);
+        const maxUnderstand = Number(r.maxUnderstand || 0);
+        const maxHots = Number(r.maxHots || 0);
+        const totalMax = Number(r.totalMax || 0) || (maxRecall + maxUnderstand + maxHots);
+
+        if (r.hasMissing) missing += 1;
+        else entered += 1;
+        if (r.hasPlan) plans += 1;
+
+        const passThreshold = totalMax > 0 ? totalMax * (passThresholdPct / 100) : Infinity;
+        if (totalScore >= passThreshold) pass += 1;
+        else fail += 1;
+
+        if (maxRecall > 0) {
+          sumRecallPct += (recall / maxRecall) * 100;
+          recallPctCount += 1;
+        }
+        if (maxUnderstand > 0) {
+          sumUnderstandPct += (understand / maxUnderstand) * 100;
+          understandPctCount += 1;
+        }
+        if (maxHots > 0) {
+          sumHotsPct += (hots / maxHots) * 100;
+          hotsPctCount += 1;
+        }
+        if (totalMax > 0) {
+          sumTotalPct += (totalScore / totalMax) * 100;
+          totalPctCount += 1;
+        }
+
+        const weakSkills = getWeakSkills(recall, understand, hots, maxRecall, maxUnderstand, maxHots) || [];
+        if (weakSkills.length === 0) noWeak += 1;
+        else {
+          if (weakSkills.includes("المعرفة والتذكر")) weakRecall += 1;
+          if (weakSkills.includes("الفهم والتحليل")) weakUnderstand += 1;
+          if (weakSkills.includes("المهارات العليا")) weakHots += 1;
+        }
+        if (weakSkills.length === 1) weakOne += 1;
+        else if (weakSkills.length === 2) weakTwo += 1;
+        else if (weakSkills.length >= 3) weakAll += 1;
+      });
+
+      const pctText = (count) => `${total > 0 ? ((count / total) * 100).toFixed(1) : "0.0"}%`;
+      const avgTotal = totalPctCount > 0 ? (sumTotalPct / totalPctCount).toFixed(1) : "0.0";
+      const avgRecall = recallPctCount > 0 ? `${(sumRecallPct / recallPctCount).toFixed(2)}%` : "0.00%";
+      const avgUnderstand = understandPctCount > 0 ? `${(sumUnderstandPct / understandPctCount).toFixed(2)}%` : "0.00%";
+      const avgHots = hotsPctCount > 0 ? `${(sumHotsPct / hotsPctCount).toFixed(2)}%` : "0.00%";
+
       return `
-        <table class="print-summary-table">
-          <tbody>
-            <tr><th>إجمالي الطالبات</th><td>${total}</td></tr>
-            <tr><th>الطالبات المدخلة علاماتهن</th><td>${entered}</td></tr>
-            <tr><th>الطالبات الناقصات علامات</th><td>${missing}</td></tr>
-            <tr><th>عدد الطالبات ذوات الضعف</th><td>${weak}</td></tr>
-            <tr><th>عدد الخطط العلاجية</th><td>${plans}</td></tr>
-            <tr><th>متوسط المجموع</th><td>${avgTotal}</td></tr>
-          </tbody>
-        </table>
+        <div class="print-summary-sheet">
+          <section class="print-summary-section">
+            <h3 class="print-summary-heading">جدول الإحصاءات</h3>
+            <table class="print-summary-table">
+              <thead>
+                <tr><th>المؤشر</th><th>القيمة</th><th>الملاحظة</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="align-right">عدد الطالبات</td><td>${total}</td><td>بعد الفلترة</td></tr>
+                <tr><td class="align-right">متوسط المجموع</td><td>${avgTotal}</td><td>%</td></tr>
+                <tr><td class="align-right">عدد الناجحات</td><td>${pass}</td><td>&gt; %${passThresholdPct}</td></tr>
+                <tr><td class="align-right">عدد الراسبات</td><td>${fail}</td><td>&lt;= %${passThresholdPct}</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="print-summary-section">
+            <h3 class="print-summary-heading">جدول متوسط المهارات</h3>
+            <table class="print-summary-table">
+              <thead>
+                <tr><th>المهارة</th><th>المتوسط</th><th>عدد الطالبات</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="align-right">متوسط المعرفة والتذكر</td><td>${avgRecall}</td><td>${recallPctCount}</td></tr>
+                <tr><td class="align-right">متوسط الفهم والتحليل</td><td>${avgUnderstand}</td><td>${understandPctCount}</td></tr>
+                <tr><td class="align-right">متوسط المهارات العليا</td><td>${avgHots}</td><td>${hotsPctCount}</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="print-summary-section">
+            <h3 class="print-summary-heading">جدول التشخيص التفصيلي</h3>
+            <table class="print-summary-table">
+              <thead>
+                <tr><th>التشخيص</th><th>عدد الطالبات</th><th>النسبة</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="align-right">لا يوجد ضعف</td><td>${noWeak}</td><td>${pctText(noWeak)}</td></tr>
+                <tr><td class="align-right">ضعف في المعرفة والتذكر</td><td>${weakRecall}</td><td>${pctText(weakRecall)}</td></tr>
+                <tr><td class="align-right">ضعف في الفهم والتحليل</td><td>${weakUnderstand}</td><td>${pctText(weakUnderstand)}</td></tr>
+                <tr><td class="align-right">ضعف في المهارات العليا</td><td>${weakHots}</td><td>${pctText(weakHots)}</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="print-summary-section">
+            <h3 class="print-summary-heading">جدول شدة الضعف</h3>
+            <table class="print-summary-table">
+              <thead>
+                <tr><th>مستوى الضعف</th><th>عدد الطالبات</th><th>النسبة</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="align-right">ضعف في مهارة واحدة</td><td>${weakOne}</td><td>${pctText(weakOne)}</td></tr>
+                <tr><td class="align-right">ضعف في مهارتين</td><td>${weakTwo}</td><td>${pctText(weakTwo)}</td></tr>
+                <tr><td class="align-right">ضعف عام</td><td>${weakAll}</td><td>${pctText(weakAll)}</td></tr>
+                <tr><td class="align-right">عدد الخطط العلاجية</td><td>${plans}</td><td>${pctText(plans)}</td></tr>
+                <tr><td class="align-right">الطالبات المدخلة علاماتهن</td><td>${entered}</td><td>${pctText(entered)}</td></tr>
+                <tr><td class="align-right">الطالبات الناقصات علامات</td><td>${missing}</td><td>${pctText(missing)}</td></tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
       `;
     }
 
@@ -2333,7 +2632,7 @@
       if (mode === "missing") return "طباعة الطالبات ناقصات العلامات";
       if (mode === "filtered") return "طباعة العرض المفلتر الحالي";
       if (mode === "single") return "طباعة صف طالبة واحدة";
-      if (mode === "summary") return "طباعة ورقة الملخص";
+      if (mode === "summary") return "ورقة الملخص";
       if (mode === "blank") return "طباعة ورقة إدخال فارغة";
       return "طباعة";
     }
@@ -2551,6 +2850,9 @@
       let allRows = [];
       let filteredRows = [];
       let assignmentRows = [];
+      let adminTableScrollSyncBound = false;
+      let syncingTopScroll = false;
+      let syncingBottomScroll = false;
 
       // Pass threshold: 50% of totalMax per record
       const PASS_THRESHOLD_PCT = 0.5;
@@ -2712,12 +3014,64 @@
         return 'color:#4ade80;font-weight:700;';                   // أخضر - ممتاز
       }
 
+      function syncAdminTopScrollbarWidth() {
+        const topScroll = document.getElementById('adminTableTopScroll');
+        const topInner = document.getElementById('adminTableTopScrollInner');
+        const tableScroll = document.getElementById('adminTableScroll');
+        const table = tableScroll?.querySelector('table.admin-table');
+        if (!topScroll || !topInner || !tableScroll || !table) return;
+
+        const contentWidth = Math.ceil(table.scrollWidth);
+        topInner.style.width = `${contentWidth}px`;
+        const hasHorizontalOverflow = contentWidth > tableScroll.clientWidth + 1;
+        topScroll.classList.toggle('is-hidden', !hasHorizontalOverflow);
+
+        if (!hasHorizontalOverflow) {
+          topScroll.scrollLeft = 0;
+          tableScroll.scrollLeft = 0;
+          return;
+        }
+        if (Math.abs(topScroll.scrollLeft - tableScroll.scrollLeft) > 1) {
+          topScroll.scrollLeft = tableScroll.scrollLeft;
+        }
+      }
+
+      function initAdminTableScrollSync() {
+        const topScroll = document.getElementById('adminTableTopScroll');
+        const tableScroll = document.getElementById('adminTableScroll');
+        if (!topScroll || !tableScroll) return;
+
+        if (!adminTableScrollSyncBound) {
+          tableScroll.addEventListener('scroll', () => {
+            if (syncingTopScroll) return;
+            syncingBottomScroll = true;
+            topScroll.scrollLeft = tableScroll.scrollLeft;
+            syncingBottomScroll = false;
+          }, { passive: true });
+
+          topScroll.addEventListener('scroll', () => {
+            if (syncingBottomScroll) return;
+            syncingTopScroll = true;
+            tableScroll.scrollLeft = topScroll.scrollLeft;
+            syncingTopScroll = false;
+          }, { passive: true });
+
+          window.addEventListener('resize', () => {
+            window.requestAnimationFrame(syncAdminTopScrollbarWidth);
+          });
+          adminTableScrollSyncBound = true;
+        }
+
+        syncAdminTopScrollbarWidth();
+      }
+
       function renderTable(rows) {
         const tbody = document.getElementById('adminTbody');
         const chip = document.getElementById('admin-count-chip');
         if (chip) chip.textContent = rows.length + ' سجل';
         if (!rows.length) {
           tbody.innerHTML = '<tr class="loading-row"><td colspan="13">لا توجد نتائج مطابقة للفلاتر</td></tr>';
+          syncAdminTopScrollbarWidth();
           return;
         }
         const frag = document.createDocumentFragment();
@@ -2747,8 +3101,8 @@
           tr.innerHTML = `
             <td class="mono" style="color:var(--muted);font-size:11px;">${i+1}</td>
             <td style="font-weight:600;min-width:180px;">${esc(r.studentName||r.name||'—')}</td>
-            <td style="min-width:120px;color:var(--muted);font-size:12px;">${esc(r.teacherName||'—')}</td>
-            <td style="white-space:nowrap;font-size:12px;">${esc(r.grade||'—')} / ${esc(r.section||'—')}</td>
+            <td class="admin-col-teacher" style="color:var(--muted);font-size:12px;">${esc(r.teacherName||'—')}</td>
+            <td class="admin-col-grade-section" style="font-size:12px;">${esc(r.grade||'—')} / ${esc(r.section||'—')}</td>
             <td style="font-size:12px;">${esc(r.subject||'—')}</td>
             <td style="color:var(--muted);font-size:12px;">${esc(r.exam||'—')}</td>
             <td class="mono" style="text-align:center;${rcStyle}">${isNaN(rv)?'—':rv}</td>
@@ -2757,7 +3111,7 @@
             <td class="mono" style="text-align:center;${totStyle}">${isNaN(tv)?'—':tv}</td>
             <td>${resultChip(estimate.txt, estimate.cls)}</td>
             <td>${resultChip(formatSkillScale(skillScale), skillScale.cls)}</td>
-            <td style="color:var(--muted);font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.plan||'—')}</td>
+            <td class="admin-plan-cell">${esc(r.plan||'—')}</td>
           `;
           tr.addEventListener('click', () => {
             selectedAdminRowId = rowId;
@@ -2769,6 +3123,7 @@
         });
         tbody.innerHTML = '';
         tbody.appendChild(frag);
+        syncAdminTopScrollbarWidth();
         const footer = document.getElementById('admin-footer-info');
         if (footer) footer.textContent = `إجمالي الظاهر: ${rows.length} من ${allRows.length} سجل`;
       }
@@ -2821,7 +3176,44 @@
           exam: uniqSorted(allRows.map((r) => r.exam))
         };
 
-        function populate(id, arr, selected) {
+        function matchesContext(row, skipKey) {
+          if (skipKey !== 'teacher' && f.teacher && row.teacherName !== f.teacher) return false;
+          if (skipKey !== 'grade' && f.grade && row.grade !== f.grade) return false;
+          if (skipKey !== 'section' && f.section && row.section !== f.section) return false;
+          if (skipKey !== 'subject' && f.subject && row.subject !== f.subject) return false;
+          if (skipKey !== 'exam' && f.exam && row.exam !== f.exam) return false;
+          return true;
+        }
+
+        function buildZeroSet(key, values) {
+          const rowFieldByKey = {
+            teacher: 'teacherName',
+            grade: 'grade',
+            section: 'section',
+            subject: 'subject'
+          };
+          const field = rowFieldByKey[key];
+          if (!field) return new Set();
+          return new Set((values || []).filter((value) => {
+            return !allRows.some((row) => matchesContext(row, key) && String(row[field] || '').trim() === value);
+          }));
+        }
+
+        const zeroSets = {
+          teacher: buildZeroSet('teacher', options.teacher),
+          grade: buildZeroSet('grade', options.grade),
+          section: buildZeroSet('section', options.section),
+          subject: buildZeroSet('subject', options.subject)
+        };
+
+        function updateSelectAlertState(sel) {
+          if (!sel) return;
+          const currentOption = sel.options[sel.selectedIndex];
+          const isZero = currentOption?.dataset?.zeroEntry === '1';
+          sel.classList.toggle('admin-filter-selected-zero', Boolean(isZero));
+        }
+
+        function populate(id, arr, selected, zeroSet = null) {
           const sel = document.getElementById(id);
           if (!sel) return;
           sel.innerHTML = '<option value="">— الكل —</option>';
@@ -2829,15 +3221,22 @@
             const o = document.createElement('option');
             o.value = v;
             o.textContent = v;
+            if (zeroSet && zeroSet.has(v)) {
+              o.dataset.zeroEntry = '1';
+              o.classList.add('admin-filter-zero-option');
+              o.style.color = '#f87171';
+              o.style.fontWeight = '700';
+            }
             sel.appendChild(o);
           });
           if (selected && arr.includes(selected)) sel.value = selected;
+          updateSelectAlertState(sel);
         }
 
-        populate('af-teacher', options.teacher, f.teacher);
-        populate('af-grade', options.grade, f.grade);
-        populate('af-section', options.section, f.section);
-        populate('af-subject', options.subject, f.subject);
+        populate('af-teacher', options.teacher, f.teacher, zeroSets.teacher);
+        populate('af-grade', options.grade, f.grade, zeroSets.grade);
+        populate('af-section', options.section, f.section, zeroSets.section);
+        populate('af-subject', options.subject, f.subject, zeroSets.subject);
         populate('af-exam', options.exam, f.exam);
       }
 
@@ -2971,6 +3370,8 @@
         }
       }
       function init() {
+        initAdminTableScrollSync();
+
         // Filter change listeners
         ['af-teacher','af-grade','af-section','af-subject','af-exam','af-level'].forEach(id => {
           const el = document.getElementById(id);
