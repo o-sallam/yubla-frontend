@@ -2600,7 +2600,7 @@
             'sc-weak-one','sc-weak-two','sc-weak-all'
           ].forEach(id => set(id,'—'));
           ['sc-no-weak-pct','sc-weak-recall-pct','sc-weak-understand-pct','sc-weak-hots-pct'].forEach(id => set(id,'—% من الإجمالي'));
-          ['sc-avg-recall-sub','sc-avg-understand-sub','sc-avg-hots-sub'].forEach(id => set(id,'—'));
+          ['sc-avg-recall-sub','sc-avg-understand-sub','sc-avg-hots-sub'].forEach(id => set(id,'0 طالبة'));
           ['sc-weak-one-sub','sc-weak-two-sub','sc-weak-all-sub'].forEach(id => set(id,'—% من الإجمالي'));
           return;
         }
@@ -2671,16 +2671,16 @@
         set('sc-avg-total', numF(avgTotalPct,1));
         colorCard(document.getElementById('sc-avg-total-card'), document.getElementById('sc-avg-total'), pctTot);
 
-        set('sc-avg-recall',     numF(avgRecallPct));
-        set('sc-avg-recall-sub', `من 100 | ${recallPctCount} طالبة`);
+        set('sc-avg-recall',     `${numF(avgRecallPct)}%`);
+        set('sc-avg-recall-sub', `${recallPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-recall-card'), document.getElementById('sc-avg-recall'), pctR);
 
-        set('sc-avg-understand',   numF(avgUnderstandPct));
-        set('sc-avg-understand-sub', `من 100 | ${understandPctCount} طالبة`);
+        set('sc-avg-understand',   `${numF(avgUnderstandPct)}%`);
+        set('sc-avg-understand-sub', `${understandPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-understand-card'), document.getElementById('sc-avg-understand'), pctU);
 
-        set('sc-avg-hots',   numF(avgHotsPct));
-        set('sc-avg-hots-sub', `من 100 | ${hotsPctCount} طالبة`);
+        set('sc-avg-hots',   `${numF(avgHotsPct)}%`);
+        set('sc-avg-hots-sub', `${hotsPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-hots-card'), document.getElementById('sc-avg-hots'), pctH);
 
         set('sc-pass', pass);
