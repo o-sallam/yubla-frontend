@@ -2605,10 +2605,10 @@
           return;
         }
 
-        let sumR=0, sumU=0, sumH=0;
+        let sumRecallPct=0, sumUnderstandPct=0, sumHotsPct=0;
+        let recallPctCount=0, understandPctCount=0, hotsPctCount=0;
         let sumTotalPct=0, totalPctCount=0;
         let pass=0, fail=0;
-        let maxR=0, maxU=0, maxH=0, cntMax=0;
         let noWeak=0, weakRecall=0, weakUnderstand=0, weakHots=0;
         let weakOne=0, weakTwo=0, weakAll=0;
 
@@ -2622,13 +2622,18 @@
           const maxHots = Number(r.maxHots)||0;
           const totalMax = Number(r.totalMax)||(maxRecall+maxUnderstand+maxHots);
 
-          sumR  += recall;
-          sumU  += understand;
-          sumH  += hots;
-          maxR  += maxRecall;
-          maxU  += maxUnderstand;
-          maxH  += maxHots;
-          cntMax++;
+          if (maxRecall > 0) {
+            sumRecallPct += (recall / maxRecall) * 100;
+            recallPctCount += 1;
+          }
+          if (maxUnderstand > 0) {
+            sumUnderstandPct += (understand / maxUnderstand) * 100;
+            understandPctCount += 1;
+          }
+          if (maxHots > 0) {
+            sumHotsPct += (hots / maxHots) * 100;
+            hotsPctCount += 1;
+          }
 
           if (totalMax > 0) {
             sumTotalPct += (total / totalMax) * 100;
@@ -2651,33 +2656,31 @@
           else if (weakSkills.length === 3) weakAll += 1;
         }
 
-        const avgMaxR   = cntMax>0 ? maxR/cntMax   : 0;
-        const avgMaxU   = cntMax>0 ? maxU/cntMax   : 0;
-        const avgMaxH   = cntMax>0 ? maxH/cntMax   : 0;
-
-        const avgR = sumR/n, avgU = sumU/n, avgH = sumH/n;
+        const avgRecallPct = recallPctCount > 0 ? (sumRecallPct / recallPctCount) : 0;
+        const avgUnderstandPct = understandPctCount > 0 ? (sumUnderstandPct / understandPctCount) : 0;
+        const avgHotsPct = hotsPctCount > 0 ? (sumHotsPct / hotsPctCount) : 0;
         const avgTotalPct = totalPctCount > 0 ? (sumTotalPct / totalPctCount) : 0;
 
         // النسب المئوية لتحديد اللون
-        const pctR   = avgMaxR>0   ? (avgR/avgMaxR)*100   : null;
-        const pctU   = avgMaxU>0   ? (avgU/avgMaxU)*100   : null;
-        const pctH   = avgMaxH>0   ? (avgH/avgMaxH)*100   : null;
+        const pctR   = recallPctCount > 0 ? avgRecallPct : null;
+        const pctU   = understandPctCount > 0 ? avgUnderstandPct : null;
+        const pctH   = hotsPctCount > 0 ? avgHotsPct : null;
         const pctTot = totalPctCount > 0 ? avgTotalPct : null;
 
         set('sc-count', n);
         set('sc-avg-total', numF(avgTotalPct,1));
         colorCard(document.getElementById('sc-avg-total-card'), document.getElementById('sc-avg-total'), pctTot);
 
-        set('sc-avg-recall',     numF(avgR));
-        set('sc-avg-recall-sub', `من ${n} طالبة`);
+        set('sc-avg-recall',     numF(avgRecallPct));
+        set('sc-avg-recall-sub', `من 100 | ${recallPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-recall-card'), document.getElementById('sc-avg-recall'), pctR);
 
-        set('sc-avg-understand',   numF(avgU));
-        set('sc-avg-understand-sub', `من ${n} طالبة`);
+        set('sc-avg-understand',   numF(avgUnderstandPct));
+        set('sc-avg-understand-sub', `من 100 | ${understandPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-understand-card'), document.getElementById('sc-avg-understand'), pctU);
 
-        set('sc-avg-hots',   numF(avgH));
-        set('sc-avg-hots-sub', `من ${n} طالبة`);
+        set('sc-avg-hots',   numF(avgHotsPct));
+        set('sc-avg-hots-sub', `من 100 | ${hotsPctCount} طالبة`);
         colorCard(document.getElementById('sc-avg-hots-card'), document.getElementById('sc-avg-hots'), pctH);
 
         set('sc-pass', pass);
