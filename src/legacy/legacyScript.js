@@ -1172,8 +1172,8 @@
         const j=await apiGet({action:"lookups"});
         if(!j.ok) throw new Error(j.error||"فشل");
         const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
-        const sessionDisplayName = cleanInput(sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "");
-        const sessionUsername = cleanInput(sessionStorage.getItem("school_session_user") || "");
+        const sessionDisplayName = String(sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "").trim();
+        const sessionUsername = String(sessionStorage.getItem("school_session_user") || "").trim();
         const teacherIdentity = sessionDisplayName || sessionUsername;
         fillSelect(teacherSel, j.teachers||[], "— اختر المعلمة —");
         fillSelect(gradeSel,   j.grades||[],   "— اختر الصف —");
