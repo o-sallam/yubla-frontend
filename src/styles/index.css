@@ -1726,15 +1726,18 @@
     .admin-table td.admin-col-teacher,
     .admin-table th.admin-col-grade-section,
     .admin-table td.admin-col-grade-section {
-      width: 120px;
-      min-width: 120px;
-      max-width: 120px;
+      width: auto;
+      min-width: 180px;
+      max-width: none;
     }
     .admin-table td.admin-col-teacher,
     .admin-table td.admin-col-grade-section {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      line-height: 1.4;
+      overflow: visible;
+      text-overflow: clip;
     }
     .admin-plan-cell {
       color:var(--muted);

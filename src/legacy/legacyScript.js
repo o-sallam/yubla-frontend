@@ -3101,8 +3101,8 @@
           tr.innerHTML = `
             <td class="mono" style="color:var(--muted);font-size:11px;">${i+1}</td>
             <td style="font-weight:600;min-width:180px;">${esc(r.studentName||r.name||'—')}</td>
-            <td class="admin-col-teacher" style="color:var(--muted);font-size:12px;">${esc(r.teacherName||'—')}</td>
-            <td class="admin-col-grade-section" style="font-size:12px;">${esc(r.grade||'—')} / ${esc(r.section||'—')}</td>
+            <td class="admin-col-teacher" style="font-weight:600;min-width:180px;">${esc(r.teacherName||'—')}</td>
+            <td class="admin-col-grade-section" style="font-weight:600;min-width:180px;">${esc(r.grade||'—')} / ${esc(r.section||'—')}</td>
             <td style="font-size:12px;">${esc(r.subject||'—')}</td>
             <td style="color:var(--muted);font-size:12px;">${esc(r.exam||'—')}</td>
             <td class="mono" style="text-align:center;${rcStyle}">${isNaN(rv)?'—':rv}</td>
