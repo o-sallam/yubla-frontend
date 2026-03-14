@@ -1171,31 +1171,38 @@
         setStatus("","جاري تحميل القوائم...");
         const j=await apiGet({action:"lookups"});
         if(!j.ok) throw new Error(j.error||"فشل");
+        const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+        const sessionDisplayName = cleanInput(sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "");
+        const sessionUsername = cleanInput(sessionStorage.getItem("school_session_user") || "");
+        const teacherIdentity = sessionDisplayName || sessionUsername;
         fillSelect(teacherSel, j.teachers||[], "— اختر المعلمة —");
         fillSelect(gradeSel,   j.grades||[],   "— اختر الصف —");
         fillSelect(sectionSel, j.sections||[], "— اختر الشعبة —");
         fillSelect(subjectSel, j.subjects||[], "— اختر المادة —");
         fillSelect(examSel,    j.exams||[],    "— اختر الامتحان —");
         if (lastDraftHeader) {
-          teacherSel.value = lastDraftHeader.teacherName || "";
+          if (currentRole !== "teacher") {
+            teacherSel.value = lastDraftHeader.teacherName || "";
+          }
           gradeSel.value = lastDraftHeader.grade || "";
           sectionSel.value = lastDraftHeader.section || "";
           subjectSel.value = lastDraftHeader.subject || "";
           examSel.value = lastDraftHeader.exam || "";
         }
-        const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
-        const displayName = sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "";
         if (currentRole === "teacher") {
-          if (displayName) {
+          if (teacherIdentity) {
             const values = (j.teachers || []);
-            if (!values.includes(displayName)) {
+            if (!values.includes(teacherIdentity)) {
               const opt = document.createElement("option");
-              opt.value = displayName;
-              opt.textContent = displayName;
+              opt.value = teacherIdentity;
+              opt.textContent = teacherIdentity;
               teacherSel.appendChild(opt);
             }
-            teacherSel.value = displayName;
-          } else if ((j.teachers || []).length === 1) {
+            teacherSel.value = teacherIdentity;
+          } else if ((j.teachers || []).length >= 1) {
+            teacherSel.value = j.teachers[0];
+          }
+          if (!teacherSel.value && (j.teachers || []).length >= 1) {
             teacherSel.value = j.teachers[0];
           }
           teacherSel.disabled = true;
@@ -2799,7 +2806,10 @@
           lastDraftHeader = h || null;
           if (h) {
             setTimeout(()=>{
-              teacherSel.value=h.teacherName||"";
+              const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+              if (currentRole !== "teacher") {
+                teacherSel.value=h.teacherName||"";
+              }
               gradeSel.value=h.grade||"";
               sectionSel.value=h.section||"";
               subjectSel.value=h.subject||"";
@@ -2816,10 +2826,23 @@
         if(raw2) {
           try {
             const d=JSON.parse(raw2), h=d.header||{};
-            teacherSel.value=h.teacherName||""; gradeSel.value=h.grade||"";
+            const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+            if (currentRole !== "teacher") {
+              teacherSel.value=h.teacherName||"";
+            }
+            gradeSel.value=h.grade||"";
             sectionSel.value=h.section||""; subjectSel.value=h.subject||""; examSel.value=h.exam||"";
             scheduleDraftSave(); validateAllRows();
           } catch(_){}
+        }
+        const hasFullContext =
+          !!teacherSel.value.trim() &&
+          !!gradeSel.value.trim() &&
+          !!sectionSel.value.trim() &&
+          !!subjectSel.value.trim() &&
+          !!examSel.value.trim();
+        if (hasFullContext) {
+          await autoFillStudents();
         }
       });
       $("btnAutoFill").addEventListener("click", ()=>{ autoFillStudents(); });
@@ -2880,18 +2903,6 @@
           startPrintMode(mode);
         });
       });
-      function onClearAllClick() {
-        if (clearingAll) return;
-        if(confirm("تفريغ الكل محليًا فقط؟ لن يتم تعديل قاعدة البيانات إلا عند الضغط على إرسال البيانات.")) {
-          clearingAll = true;
-          resetAllData(false);
-        }
-      }
-      const clearBtn = $("btnClearDraft");
-      if (clearBtn) {
-        clearBtn.removeEventListener("click", onClearAllClick);
-        clearBtn.addEventListener("click", onClearAllClick);
-      }
       initGridClipboardInteractions();
 
       modalCancel.addEventListener("click", ()=>{ confirmModal.classList.remove("visible"); pendingSubmit=null; });
@@ -3379,6 +3390,17 @@
         };
       }
 
+      function resetAdminFilters(shouldApply = true) {
+        ['af-teacher','af-grade','af-section','af-subject','af-exam','af-level'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        const searchEl = document.getElementById('adminSearch');
+        if (searchEl) searchEl.value = '';
+        selectedAdminRowId = '';
+        if (shouldApply) applyFilters();
+      }
+
       async function apiGet(params) {
         const token = sessionStorage.getItem("school_session_token") || "";
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -3484,17 +3506,14 @@
 
         // Refresh
         const refreshBtn = document.getElementById('adminRefresh');
-        if (refreshBtn) refreshBtn.addEventListener('click', loadData);
+        if (refreshBtn) refreshBtn.addEventListener('click', () => {
+          resetAdminFilters(false);
+          loadData();
+        });
 
         // Clear filters
         const clearBtn = document.getElementById('adminClearFilters');
-        if (clearBtn) clearBtn.addEventListener('click', () => {
-          ['af-teacher','af-grade','af-section','af-subject','af-exam','af-level'].forEach(id => {
-            const el = document.getElementById(id); if(el) el.value = '';
-          });
-          const s = document.getElementById('adminSearch'); if(s) s.value = '';
-          applyFilters();
-        });
+        if (clearBtn) clearBtn.addEventListener('click', () => resetAdminFilters(true));
       }
 
       return { init, loadData, getPrintSnapshot };
