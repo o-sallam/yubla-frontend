@@ -740,17 +740,25 @@
             <input type="text" id="acctNewPass" placeholder="كلمة مرور جديدة" />
           </div>
           <div class="f12">
+            <label>Theme</label>
+            <button type="button" class="info with-icon theme-toggle-btn" id="acctThemeToggle">
+              <span class="theme-toggle-icon" id="acctThemeToggleIconWrap"><i data-lucide="moon" aria-hidden="true"></i></span>
+              <span id="acctThemeToggleText">Dark mood</span>
+            </button>
+          </div>
+          <div class="f12">
             <div class="status-bar" id="acctMsg" style="display:none;"></div>
           </div>
           <div class="f12" id="acctSuperSwitchWrap" style="display:none;">
             <div class="section-divider" style="margin:8px 0 12px;"></div>
-            <label>الدخول كمدير / معلم</label>
+            <label>الدخول كمدير / معلم / مشرف</label>
             <div class="form-grid">
               <div class="f6">
                 <label>نوع العرض</label>
                 <select id="acctSuperMode">
                   <option value="">لوحة أدمن المنصة</option>
                   <option value="admin">مدير</option>
+                  <option value="supervisor">مشرف تربوي</option>
                   <option value="teacher">معلم</option>
                 </select>
               </div>

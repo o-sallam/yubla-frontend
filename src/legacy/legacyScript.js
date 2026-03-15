@@ -69,13 +69,16 @@
 
     let pendingSubmit = null;
     const DRAFT_MODULE = "teacher";
-    const DRAFT_DEBOUNCE_MS = 650;
+    const DRAFT_DEBOUNCE_MS = 1200;
     const SESSION_ROLE_KEY = "school_session_v1";
     const SESSION_TOKEN_KEY_GLOBAL = "school_session_token";
     const SESSION_USER_DISPLAY_KEY = "school_session_user_display";
     const SESSION_SCHOOL_NAME_KEY = "school_session_school_name";
     const SUPERVISOR_TENANT_KEY = "school_supervisor_tenant_v1";
     const SUPER_IMPERSONATION_KEY = "school_super_impersonation_v1";
+    const THEME_PREF_KEY = "school_theme_v1";
+    const THEME_DARK = "dark";
+    const THEME_LIGHT = "light";
     const DEFAULT_MAX_RECALL = 10;
     const DEFAULT_MAX_UNDERSTAND = 5;
     const DEFAULT_MAX_HOTS = 5;
@@ -89,13 +92,18 @@
     let rowViewTimer = null;
     let activePrintContext = "teacher";
     let voiceSnInputTimer = null;
+    let validationChipTimer = null;
     let filtersAutoRefreshTimer = null;
+    let filterRefreshSeq = 0;
     let lastLoadedTableContextKey = "";
     let lastLimitsContextKey = "";
     let limitsByContextCache = null;
     let limitsFetchSeq = 0;
     let tableContext = { grade: "", section: "" };
     let teacherScopedAssignments = [];
+    const contextLatestCache = new Map();
+    let lastSavedDraftPayload = "";
+    let currentTheme = THEME_DARK;
     const rowNameCollator = new Intl.Collator("ar", { sensitivity: "base", numeric: true });
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     const supportsSpeechSynthesis =
@@ -141,6 +149,53 @@
     };
     const iconMarkup = (name, extraClass = "") =>
       `<i data-lucide="${name}"${extraClass ? ` class="${extraClass}"` : ""} aria-hidden="true"></i>`;
+    function normalizeTheme(theme) {
+      return String(theme || "").trim() === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+    }
+    function readSavedTheme() {
+      try {
+        return normalizeTheme(localStorage.getItem(THEME_PREF_KEY));
+      } catch (_) {
+        return THEME_DARK;
+      }
+    }
+    function persistTheme(theme) {
+      try {
+        localStorage.setItem(THEME_PREF_KEY, normalizeTheme(theme));
+      } catch (_) {}
+    }
+    function syncThemeToggleControl() {
+      const btn = $("acctThemeToggle");
+      const text = $("acctThemeToggleText");
+      const iconWrap = $("acctThemeToggleIconWrap");
+      if (!btn || !text || !iconWrap) return;
+      const isLightTheme = currentTheme === THEME_LIGHT;
+      text.textContent = isLightTheme ? "Lite mood" : "Dark mood";
+      iconWrap.innerHTML = `<i data-lucide="${isLightTheme ? "sun" : "moon"}" aria-hidden="true"></i>`;
+      const switchTitle = isLightTheme ? "Switch to Dark mood" : "Switch to Lite mood";
+      btn.setAttribute("title", switchTitle);
+      btn.setAttribute("aria-label", switchTitle);
+      renderLucideIcons();
+    }
+    function applyTheme(theme, options = {}) {
+      const nextTheme = normalizeTheme(theme);
+      const persist = options.persist !== false;
+      currentTheme = nextTheme;
+      if (document?.documentElement) {
+        document.documentElement.setAttribute("data-theme", nextTheme);
+      }
+      if (document?.body) {
+        document.body.setAttribute("data-theme", nextTheme);
+      }
+      if (persist) persistTheme(nextTheme);
+      syncThemeToggleControl();
+      return nextTheme;
+    }
+    function toggleTheme() {
+      const nextTheme = currentTheme === THEME_LIGHT ? THEME_DARK : THEME_LIGHT;
+      return applyTheme(nextTheme);
+    }
+    applyTheme(readSavedTheme(), { persist: false });
 
     let superImpersonationContext = null;
     function getSessionRole() {
@@ -218,10 +273,12 @@
       const context = getSuperImpersonationContext();
       const adminBanner = $("superAdminModeBanner");
       const teacherBanner = $("superTeacherModeBanner");
-      if (context?.mode === "admin") {
+      const isAdminLikeMode = context?.mode === "admin" || context?.mode === "supervisor";
+      if (isAdminLikeMode) {
         if (superExitAdminModeBtn) superExitAdminModeBtn.style.display = "inline-flex";
         if (superExitTeacherModeBtn) superExitTeacherModeBtn.style.display = "none";
-        setInlineStatus(adminBanner, `وضع مدير نشط — ${context.tenantName || "مدرسة محددة"}`, "warn");
+        const modeLabel = context?.mode === "supervisor" ? "وضع مشرف تربوي نشط" : "وضع مدير نشط";
+        setInlineStatus(adminBanner, `${modeLabel} — ${context?.tenantName || "مدرسة محددة"}`, "warn");
         setInlineStatus(teacherBanner, "", "");
       } else if (context?.mode === "teacher") {
         if (superExitAdminModeBtn) superExitAdminModeBtn.style.display = "none";
@@ -266,17 +323,23 @@
       if (teacherApp) teacherApp.style.display = "block";
       updateSuperModeUi();
     }
-    function activateSuperImpersonation(context) {
+    async function activateSuperImpersonation(context) {
       setSuperImpersonationContext(context);
-      if ((context?.mode || "") === "admin") {
+      if ((context?.mode || "") === "admin" || (context?.mode || "") === "supervisor") {
         showAdminScreenOnly();
         if (typeof adminDash !== "undefined") {
           adminDash.init();
-          adminDash.loadData();
+          await runStartupQuietTask(
+            () => adminDash.loadData(),
+            "جارٍ تجهيز لوحة التحليل..."
+          );
         }
       } else if ((context?.mode || "") === "teacher") {
         showTeacherScreenOnly();
-        loadLookups();
+        await runStartupQuietTask(
+          () => loadLookups({ startup: true }),
+          "جارٍ تجهيز شاشة المعلم..."
+        );
       }
       updateSuperModeUi();
     }
@@ -314,6 +377,7 @@
       const statusSubText = String(sub || "").trim();
       const inTeacherLikeContext = isTeacherLikeMode();
       if (inTeacherLikeContext) {
+        if (isStartupQuietMode() && statusType !== "bad") return;
         statusBox.className = "status-bar";
         statusDot.className = "dot";
         statusMsg.textContent = "";
@@ -331,8 +395,27 @@
       statusSub.textContent = statusSubText;
     }
     let loadingTimer = null;
-    function startLoading(opText="") {
-      if (isTeacherLikeMode()) return;
+    let startupQuietDepth = 0;
+    function isStartupQuietMode() {
+      return startupQuietDepth > 0;
+    }
+    async function runStartupQuietTask(task, loadingText = "جارٍ تجهيز الصفحة...") {
+      startupQuietDepth += 1;
+      hideQuickNotice();
+      startLoading(loadingText, { force: true });
+      try {
+        return await Promise.resolve().then(task);
+      } finally {
+        startupQuietDepth = Math.max(0, startupQuietDepth - 1);
+        if (startupQuietDepth === 0) {
+          const hasBlockingError = Boolean(globalLoading?.classList?.contains("loading-error"));
+          if (!hasBlockingError) stopLoading({ force: true });
+        }
+      }
+    }
+    function startLoading(opText="", options = {}) {
+      const force = Boolean(options?.force);
+      if (isTeacherLikeMode() && !force) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("loading-error","loading-success");
@@ -346,6 +429,7 @@
       globalLoading.classList.add("visible");
     }
     function succeed(msg="تمت العملية بنجاح") {
+      if (isStartupQuietMode()) return;
       if (isTeacherLikeMode()) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
@@ -360,8 +444,9 @@
       }
       loadingTimer = setTimeout(() => stopLoading(), 1200);
     }
-    function fail(msg="تعذر إتمام العملية") {
-      if (isTeacherLikeMode()) return;
+    function fail(msg="تعذر إتمام العملية", options = {}) {
+      const force = Boolean(options?.force);
+      if (isTeacherLikeMode() && !force) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("loading-success");
@@ -375,8 +460,9 @@
       }
       globalLoading.classList.add("visible");
     }
-    function stopLoading() {
-      if (isTeacherLikeMode()) return;
+    function stopLoading(options = {}) {
+      const force = Boolean(options?.force);
+      if (isTeacherLikeMode() && !force) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("visible","loading-error","loading-success");
@@ -562,6 +648,7 @@
     }
     function showQuickNotice(message, type = "info", timeoutMs = 2200, options = {}) {
       if (!quickNotice) return;
+      if (isStartupQuietMode() && String(type || "").trim() !== "bad") return;
       const requireAck = options.requireAck !== false;
       const { textEl } = ensureQuickNoticeUi();
       if (textEl) textEl.textContent = message || "";
@@ -1235,7 +1322,7 @@
         iHots.classList.toggle("mark-over-limit", overHots);
         const bad = overRecall || overUnderstand || overHots;
         tr.classList.toggle("invalid-row", bad);
-        updateValidationChip();
+        scheduleValidationChipUpdate();
       }
 
       function onFocus() {
@@ -1373,6 +1460,12 @@
       renderLucideIcons();
       return bad;
     }
+    function scheduleValidationChipUpdate(delayMs = 90) {
+      clearTimeout(validationChipTimer);
+      validationChipTimer = setTimeout(() => {
+        updateValidationChip();
+      }, Math.max(0, Number(delayMs) || 0));
+    }
     function hasTableRows() {
       return getStudentRows().length > 0;
     }
@@ -1401,6 +1494,32 @@
     }
     function makeTableContextKey(ctx) {
       return [ctx.teacher, ctx.grade, ctx.section, ctx.subject, ctx.exam].join("|");
+    }
+    function clearContextLatestCache(ctx = null) {
+      if (!ctx) {
+        contextLatestCache.clear();
+        return;
+      }
+      contextLatestCache.delete(makeTableContextKey(ctx));
+    }
+    async function fetchLatestBatchForContext(ctx = getCurrentTableContext(), options = {}) {
+      if (!hasFullTableContext(ctx)) return null;
+      const force = Boolean(options.force);
+      const key = makeTableContextKey(ctx);
+      if (!force && contextLatestCache.has(key)) {
+        return contextLatestCache.get(key);
+      }
+      const res = await apiGet({
+        action: "submissionsContextLatest",
+        teacherName: ctx.teacher,
+        grade: ctx.grade,
+        section: ctx.section,
+        subject: ctx.subject,
+        exam: ctx.exam
+      });
+      const latestBatch = res?.latestBatch || null;
+      contextLatestCache.set(key, latestBatch);
+      return latestBatch;
     }
     function getDefaultLimitsPayload() {
       const maxRecall = Math.max(0, num(DEFAULT_MAX_RECALL));
@@ -1486,35 +1605,14 @@
     }
     async function fetchLatestLimitsForContextFromSubmissions(ctx) {
       if (!hasFullTableContext(ctx)) return null;
-      const normalize = (v) => String(v || "").trim();
-      const res = await apiGet({ action: "submissions" });
-      const rows = Array.isArray(res?.rows) ? res.rows : [];
-      if (!rows.length) return null;
-
-      let latest = null;
-      for (const r of rows) {
-        if (
-          normalize(r?.[2]) !== ctx.teacher ||
-          normalize(r?.[3]) !== ctx.grade ||
-          normalize(r?.[4]) !== ctx.section ||
-          normalize(r?.[5]) !== ctx.subject ||
-          normalize(r?.[6]) !== ctx.exam
-        ) {
-          continue;
-        }
-        const timestamp = normalize(r?.[0]);
-        if (!latest || timestamp > latest.timestamp) {
-          latest = {
-            timestamp,
-            maxRecall: r?.[7],
-            maxUnderstand: r?.[8],
-            maxHots: r?.[9],
-            totalMax: r?.[10]
-          };
-        }
-      }
-      if (!latest) return null;
-      return normalizeLimitsPayload(latest);
+      const latestBatch = await fetchLatestBatchForContext(ctx);
+      if (!latestBatch) return null;
+      return normalizeLimitsPayload({
+        maxRecall: latestBatch.maxRecall,
+        maxUnderstand: latestBatch.maxUnderstand,
+        maxHots: latestBatch.maxHots,
+        totalMax: latestBatch.totalMax
+      });
     }
     async function applyLimitsForContext(ctx = getCurrentTableContext(), options = {}) {
       if (!hasFullTableContext(ctx)) {
@@ -1632,18 +1730,15 @@
       let latest = null;
       if (teacherName) {
         try {
-          const subRes = await apiGet({ action: "submissions" });
-          const rows = Array.isArray(subRes?.rows) ? subRes.rows : [];
+          const latestRes = await apiGet({ action: "submissionsLatestContext", teacherName });
+          const latestContext = latestRes?.latest || null;
           const normalize = (v) => String(v || "").trim();
-          const matched = rows
-            .filter((r) => normalize(r?.[2]) === teacherName)
-            .sort((a, b) => String(b?.[0] || "").localeCompare(String(a?.[0] || "")));
-          if (matched.length) {
+          if (latestContext) {
             latest = {
-              grade: normalize(matched[0]?.[3]),
-              section: normalize(matched[0]?.[4]),
-              subject: normalize(matched[0]?.[5]),
-              exam: normalize(matched[0]?.[6])
+              grade: normalize(latestContext.grade),
+              section: normalize(latestContext.section),
+              subject: normalize(latestContext.subject),
+              exam: normalize(latestContext.exam)
             };
           }
         } catch (_) {}
@@ -1666,6 +1761,7 @@
     async function refreshTableFromFilters(options = {}) {
       const force = Boolean(options.force);
       const quietIncomplete = options.quietIncomplete !== false;
+      const silentSuccess = Boolean(options.silentSuccess);
       const context = getCurrentTableContext();
       if (!hasFullTableContext(context)) {
         if (!quietIncomplete) setStatus("warn", "يرجى اختيار الصف والشعبة والمادة والامتحان");
@@ -1673,14 +1769,35 @@
       }
       const key = makeTableContextKey(context);
       if (!force && key === lastLoadedTableContextKey) return true;
-      const loaded = await autoFillStudents({ quietIncomplete, force });
+      const loaded = await autoFillStudents({ quietIncomplete, force, silentSuccess });
       if (loaded) lastLoadedTableContextKey = key;
       return loaded;
     }
     function scheduleRefreshTableFromFilters(options = {}) {
       clearTimeout(filtersAutoRefreshTimer);
+      const showSpinner = Boolean(options.showSpinner);
+      const spinnerSeq = Number(options.spinnerSeq || 0);
+      const loadingText = String(options.loadingText || "جارٍ تحديث الجدول حسب الفلاتر...").trim();
+      const refreshOptions = { ...options };
+      delete refreshOptions.showSpinner;
+      delete refreshOptions.spinnerSeq;
+      delete refreshOptions.loadingText;
+      if (showSpinner) refreshOptions.silentSuccess = true;
       filtersAutoRefreshTimer = setTimeout(() => {
-        refreshTableFromFilters(options).catch(() => {});
+        (async () => {
+          if (showSpinner) startLoading(loadingText, { force: true });
+          let loaded = false;
+          try {
+            loaded = await refreshTableFromFilters(refreshOptions);
+          } catch (_) {
+            loaded = false;
+          } finally {
+            if (showSpinner && spinnerSeq === filterRefreshSeq) {
+              stopLoading({ force: true });
+              if (loaded) setStatus("ok", "تم تحديث الجدول");
+            }
+          }
+        })();
       }, 220);
     }
 
@@ -1711,8 +1828,55 @@
         if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
         return data;
       }
+      if (action === "teacherTableSnapshot") {
+        const url = new URL(withSuperTenantUrl("/api/v1/teacher/table-snapshot", ["teacher"]));
+        url.searchParams.set("grade", p.grade || "");
+        url.searchParams.set("section", p.section || "");
+        if (p.subject) url.searchParams.set("subject", p.subject);
+        if (p.exam) url.searchParams.set("exam", p.exam);
+        if (p.teacherName) url.searchParams.set("teacherName", p.teacherName);
+        const res = await fetch(url.toString(), { method: "GET", headers: getAuthHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
+        return data;
+      }
       if (action === "submissions") {
-        const res = await fetch(withSuperTenantUrl("/api/v1/submissions", ["teacher", "admin"]), {
+        const url = new URL(withSuperTenantUrl("/api/v1/submissions", ["teacher", "admin"]));
+        if (p.teacherName) url.searchParams.set("teacherName", p.teacherName);
+        if (p.grade) url.searchParams.set("grade", p.grade);
+        if (p.section) url.searchParams.set("section", p.section);
+        if (p.subject) url.searchParams.set("subject", p.subject);
+        if (p.exam) url.searchParams.set("exam", p.exam);
+        if (p.batchId) url.searchParams.set("batchId", p.batchId);
+        if (p.limit !== undefined && p.limit !== null && p.limit !== "") url.searchParams.set("limit", p.limit);
+        if (p.offset !== undefined && p.offset !== null && p.offset !== "") url.searchParams.set("offset", p.offset);
+        const res = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
+        return data;
+      }
+      if (action === "submissionsLatestContext") {
+        const url = new URL(withSuperTenantUrl("/api/v1/submissions/latest-context", ["teacher", "admin"]));
+        if (p.teacherName) url.searchParams.set("teacherName", p.teacherName);
+        const res = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
+        return data;
+      }
+      if (action === "submissionsContextLatest") {
+        const url = new URL(withSuperTenantUrl("/api/v1/submissions/context-latest", ["teacher", "admin"]));
+        if (p.teacherName) url.searchParams.set("teacherName", p.teacherName);
+        if (p.grade) url.searchParams.set("grade", p.grade);
+        if (p.section) url.searchParams.set("section", p.section);
+        if (p.subject) url.searchParams.set("subject", p.subject);
+        if (p.exam) url.searchParams.set("exam", p.exam);
+        const res = await fetch(url.toString(), {
           method: "GET",
           headers: getAuthHeaders()
         });
@@ -1751,15 +1915,21 @@
       throw new Error("action غير مدعوم");
     }
 
-    async function loadLookups() {
+    async function loadLookups(options = {}) {
+      const startup = Boolean(options?.startup);
+      const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+      const superModeContext = getSuperImpersonationContext();
+      const isSuperTeacherMode = currentRole === "super" && superModeContext?.mode === "teacher";
+      const hasToken = Boolean(String(sessionStorage.getItem(SESSION_TOKEN_KEY_GLOBAL) || "").trim());
+      if (!(currentRole === "teacher" || isSuperTeacherMode) || !hasToken) {
+        return false;
+      }
       try {
-        startLoading("جارٍ تحديث القوائم...");
+        clearContextLatestCache();
+        startLoading(startup ? "جارٍ تجهيز شاشة المعلم..." : "جارٍ تحديث القوائم...", { force: startup });
         setStatus("","جاري تحميل القوائم...");
         const j=await apiGet({action:"lookups"});
         if(!j.ok) throw new Error(j.error||"فشل");
-        const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
-        const superModeContext = getSuperImpersonationContext();
-        const isSuperTeacherMode = currentRole === "super" && superModeContext?.mode === "teacher";
         const sessionDisplayName = String(sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "").trim();
         const sessionUsername = String(sessionStorage.getItem("school_session_user") || "").trim();
         const teacherIdentity = sessionDisplayName || sessionUsername;
@@ -1858,14 +2028,23 @@
         setStatus("ok","تم تحميل القوائم بنجاح");
         succeed("تم تحديث القوائم بنجاح");
         scheduleDraftSave();
+        return true;
       } catch(e) {
+        const message = String(e?.message || "");
+        if (/unauthorized/i.test(message)) {
+          stopLoading();
+          setStatus("warn","انتهت الجلسة، يرجى تسجيل الدخول من جديد");
+          return false;
+        }
         setStatus("bad","تعذر تحميل القوائم",e.message);
         fail("تعذر تحديث القوائم");
+        return false;
       }
     }
     async function autoFillStudents(options = {}) {
       const quietIncomplete = options.quietIncomplete !== false;
       const force = Boolean(options.force);
+      const silentSuccess = Boolean(options.silentSuccess);
       try {
         const grade=gradeSel.value.trim(), section=sectionSel.value.trim();
         const missingGrade = !grade;
@@ -1882,24 +2061,39 @@
           if (!quietIncomplete) setStatus("warn","يرجى اختيار الشعبة");
           return false;
         }
-        const contextKey = makeTableContextKey(getCurrentTableContext());
+        const context = getCurrentTableContext();
+        const contextKey = makeTableContextKey(context);
         if (!force && contextKey === lastLoadedTableContextKey && getStudentRows().length > 0) {
           return true;
         }
         startLoading("جارٍ جلب أسماء الطالبات...");
         setStatus("","جاري تعبئة الأسماء...",`${grade} / ${section}`);
-        const j=await apiGet({action:"students",grade,section});
-        if(!j.ok) throw new Error(j.error||"فشل");
-        const list=j.students||[];
+        const snapshot = await apiGet({
+          action: "teacherTableSnapshot",
+          grade,
+          section,
+          subject: context.subject,
+          exam: context.exam,
+          teacherName: context.teacher
+        });
+        if (!snapshot?.ok) throw new Error(snapshot?.error || "فشل");
+        const list = snapshot.students || [];
         setRows(list);
-        const restored = await hydrateRowsFromLatestSubmission();
-        lastLoadedTableContextKey = contextKey;
-        if (restored > 0) {
-          setStatus("ok", `تمت تعبئة ${list.length} طالبة`, `تم استرجاع آخر إرسال (${restored} طالبة)`);
-        } else {
-          setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
+        const latestBatch = snapshot.latestBatch || null;
+        if (hasFullTableContext(context)) {
+          if (latestBatch) contextLatestCache.set(contextKey, latestBatch);
+          else clearContextLatestCache(context);
         }
-        succeed("تم جلب البيانات بنجاح");
+        const restored = hydrateRowsFromBatch(latestBatch);
+        lastLoadedTableContextKey = contextKey;
+        if (!silentSuccess) {
+          if (restored > 0) {
+            setStatus("ok", `تمت تعبئة ${list.length} طالبة`, `تم استرجاع آخر إرسال (${restored} طالبة)`);
+          } else {
+            setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
+          }
+          succeed("تم جلب البيانات بنجاح");
+        }
         return true;
       } catch(e) {
         setStatus("bad","تعذر تعبئة الطالبات",e.message);
@@ -1907,41 +2101,19 @@
         return false;
       }
     }
-    async function hydrateRowsFromLatestSubmission() {
-      const teacherName = teacherSel.value.trim();
-      const grade = gradeSel.value.trim();
-      const section = sectionSel.value.trim();
-      const subject = subjectSel.value.trim();
-      const exam = examSel.value.trim();
-      if (!teacherName || !grade || !section || !subject || !exam) return 0;
-
-      const res = await apiGet({ action: "submissions" });
-      const allRows = Array.isArray(res?.rows) ? res.rows : [];
-      if (!allRows.length) return 0;
-
-      const normalize = (v) => String(v || "").trim();
-      const matched = allRows.filter((r) =>
-        normalize(r?.[2]) === teacherName &&
-        normalize(r?.[3]) === grade &&
-        normalize(r?.[4]) === section &&
-        normalize(r?.[5]) === subject &&
-        normalize(r?.[6]) === exam
-      );
-      if (!matched.length) return 0;
-
-      const latestBatchId = normalize(matched[0]?.[1]);
-      const currentBatchRows = matched.filter((r) => normalize(r?.[1]) === latestBatchId);
-      if (!currentBatchRows.length) return 0;
-
+    function hydrateRowsFromBatch(latestBatch) {
+      if (!latestBatch || !Array.isArray(latestBatch.rows) || !latestBatch.rows.length) return 0;
+      const latestBatchId = String(latestBatch.batchId || "").trim();
       const byName = new Map();
-      currentBatchRows.forEach((r) => {
-        const name = normalize(r?.[11]);
+      const normalize = (v) => String(v || "").trim();
+      latestBatch.rows.forEach((r) => {
+        const name = normalize(r?.studentName);
         if (!name || byName.has(name)) return;
         byName.set(name, {
-          recall: r?.[12] ?? "",
-          understand: r?.[13] ?? "",
-          hots: r?.[14] ?? "",
-          plan: r?.[16] ?? ""
+          recall: r?.recall ?? "",
+          understand: r?.understand ?? "",
+          hots: r?.hots ?? "",
+          plan: r?.plan ?? ""
         });
       });
 
@@ -1969,6 +2141,12 @@
         saveDraftSoft();
       }
       return hydrated;
+    }
+    async function hydrateRowsFromLatestSubmission() {
+      const context = getCurrentTableContext();
+      if (!hasFullTableContext(context)) return 0;
+      const latestBatch = await fetchLatestBatchForContext(context);
+      return hydrateRowsFromBatch(latestBatch);
     }
     function checkIncomplete() {
       return getStudentRows().filter(tr => {
@@ -2031,6 +2209,37 @@
         const payload=collectPayload(fillEmpty);
         const j=await apiPost({action:"submit",...payload});
         if(!j.ok) throw new Error(j.error||"فشل");
+        const submittedContext = {
+          teacher: payload.header.teacherName,
+          grade: payload.header.grade,
+          section: payload.header.section,
+          subject: payload.header.subject,
+          exam: payload.header.exam
+        };
+        clearContextLatestCache(submittedContext);
+        if (hasFullTableContext(submittedContext)) {
+          contextLatestCache.set(makeTableContextKey(submittedContext), {
+            batchId: j.batchId || "",
+            timestamp: new Date().toISOString(),
+            teacherName: payload.header.teacherName,
+            grade: payload.header.grade,
+            section: payload.header.section,
+            subject: payload.header.subject,
+            exam: payload.header.exam,
+            maxRecall: payload.header.maxRecall,
+            maxUnderstand: payload.header.maxUnderstand,
+            maxHots: payload.header.maxHots,
+            totalMax: payload.header.totalMax,
+            rows: payload.rows.map((row) => ({
+              studentName: row.studentName,
+              recall: row.recall,
+              understand: row.understand,
+              hots: row.hots,
+              total: row.recall + row.understand + row.hots,
+              plan: row.plan || ""
+            }))
+          });
+        }
         lastBatch.textContent=j.batchId||"—";
         setStatus("ok",`تم حفظ الإرسال بنجاح (${j.inserted} سجل)`,`يمكنك التعديل وإعادة الإرسال لنفس الصف | BatchID: ${j.batchId}`);
         saveDraftSoft();
@@ -2108,7 +2317,12 @@
       return h;
     }
     function saveDraftSoft() {
-      try { localStorage.setItem(DRAFT_KEY,JSON.stringify(getState())); } catch(_){}
+      try {
+        const payload = JSON.stringify(getState());
+        if (payload === lastSavedDraftPayload) return;
+        localStorage.setItem(DRAFT_KEY, payload);
+        lastSavedDraftPayload = payload;
+      } catch(_){}
     }
     function scheduleDraftSave() {
       clearTimeout(draftTimer);
@@ -2117,6 +2331,7 @@
     function clearDraft() {
       clearTimeout(draftTimer);
       try { localStorage.removeItem(DRAFT_KEY); } catch(_){}
+      lastSavedDraftPayload = "";
     }
     function resetAllData(shouldReload=false) {
       clearDraft();
@@ -3549,6 +3764,7 @@
       const raw=localStorage.getItem(DRAFT_KEY);
       if(raw) {
         try {
+          lastSavedDraftPayload = raw;
           const draft=JSON.parse(raw);
           const h=applyState(draft);
           lastDraftHeader = h || null;
@@ -3690,22 +3906,35 @@
           }
           const contextSnapshot = getCurrentTableContext();
           const contextKeySnapshot = makeTableContextKey(contextSnapshot);
+          const shouldRefreshTable = s === gradeSel || s === sectionSel || s === subjectSel || s === examSel;
+          let refreshSeq = 0;
+          if (shouldRefreshTable) {
+            refreshSeq = ++filterRefreshSeq;
+            startLoading("جارٍ تحديث الجدول حسب الفلاتر...", { force: true });
+          }
           updateAutoFillButtonState();
           refreshStudentRowsView({ skipSort: true });
-          if(s===gradeSel||s===sectionSel||s===subjectSel||s===examSel) {
-            setStatus("","جاري تحديث الجدول حسب الفلاتر...");
-          }
           applyLimitsForContext(contextSnapshot, { allowSubmissionFallback: true })
             .catch(()=>{})
             .finally(() => {
-              if (makeTableContextKey(getCurrentTableContext()) !== contextKeySnapshot) return;
+              if (makeTableContextKey(getCurrentTableContext()) !== contextKeySnapshot) {
+                if (shouldRefreshTable && refreshSeq === filterRefreshSeq) {
+                  stopLoading({ force: true });
+                }
+                return;
+              }
               scheduleDraftSave();
-              scheduleRefreshTableFromFilters({ force: false, quietIncomplete: true });
+              scheduleRefreshTableFromFilters({
+                force: false,
+                quietIncomplete: true,
+                showSpinner: shouldRefreshTable,
+                spinnerSeq: refreshSeq,
+                loadingText: "جارٍ تحديث الجدول حسب الفلاتر..."
+              });
             });
         });
       });
 
-      loadLookups();
       updateAutoFillButtonState();
       refreshStudentRowsView({ skipSort: true });
       updateVoicePanelInfo();
@@ -3716,6 +3945,7 @@
         pendingSubmit = null;
         stopLoading();
         stopVoiceRecognition(false);
+        clearTimeout(validationChipTimer);
         clearPrintSheet();
       });
     }
@@ -4236,7 +4466,10 @@
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
         const sessionRole = String(sessionStorage.getItem(SESSION_ROLE_KEY) || "").trim();
         const superContext = getSuperImpersonationContext();
-        const isSuperAdminMode = sessionRole === "super" && superContext?.mode === "admin" && !!superContext.tenantId;
+        const isSuperScopedMode =
+          sessionRole === "super" &&
+          (superContext?.mode === "admin" || superContext?.mode === "supervisor") &&
+          !!superContext.tenantId;
         const isSupervisorMode = sessionRole === "supervisor";
         const supervisorTenantId = getSupervisorTenantId();
         if (params.action === "supervisorTenants") {
@@ -4247,7 +4480,7 @@
         }
         if (params.action === 'lookups') {
           const url = new URL(withApiBase('/api/v1/lookups'));
-          if (isSuperAdminMode) url.searchParams.set('tenantId', superContext.tenantId);
+          if (isSuperScopedMode) url.searchParams.set('tenantId', superContext.tenantId);
           if (isSupervisorMode) {
             if (!supervisorTenantId) throw new Error("يرجى اختيار المدرسة أولاً");
             url.searchParams.set("tenantId", supervisorTenantId);
@@ -4259,7 +4492,7 @@
         }
         if (params.action === 'getData') {
           const url = new URL(withApiBase('/api/v1/submissions'));
-          if (isSuperAdminMode) url.searchParams.set('tenantId', superContext.tenantId);
+          if (isSuperScopedMode) url.searchParams.set('tenantId', superContext.tenantId);
           if (isSupervisorMode) {
             if (!supervisorTenantId) throw new Error("يرجى اختيار المدرسة أولاً");
             url.searchParams.set("tenantId", supervisorTenantId);
@@ -4270,7 +4503,7 @@
           return data;
         }
         if (params.action === 'adminAssignments') {
-          if (isSuperAdminMode || isSupervisorMode) {
+          if (isSuperScopedMode || isSupervisorMode) {
             return { ok: true, assignments: [] };
           }
           const res = await fetch(withApiBase('/api/v1/admin/assignments'), { method: 'GET', headers });
@@ -4305,20 +4538,19 @@
           }
         }
 
-        // ── Step 1: load assignments for dynamic dependent filters ──
         try {
-          const asg = await apiGet({ action: 'adminAssignments' });
-          assignmentRows = (asg.assignments || []).map((a) => ({
+          const assignmentsPromise = apiGet({ action: 'adminAssignments' }).catch((e) => {
+            console.warn('فشل تحميل القوائم:', e.message);
+            return { ok: true, assignments: [] };
+          });
+          const dataPromise = apiGet({ action: 'getData' });
+          const [asg, j] = await Promise.all([assignmentsPromise, dataPromise]);
+          assignmentRows = (asg?.assignments || []).map((a) => ({
             teacherName: a.teacherName || '',
             grade: a.grade || '',
             section: a.section || '',
             subject: a.subject || ''
           }));
-        } catch(e) { console.warn('فشل تحميل القوائم:', e.message); }
-
-        // ── Step 2: load master data ──
-        try {
-          const j = await apiGet({ action: 'getData' });
           if (!j.ok) throw new Error(j.error || 'فشل جلب البيانات');
 
           // الأعمدة من الماستر (حسب ترتيب appendBatchToMaster_):
@@ -5067,6 +5299,7 @@
       const acctNewPassEl = document.getElementById('acctNewPass');
       const acctSaveBtn = document.getElementById('acctSaveBtn');
       const acctLogoutBtn = document.getElementById('acctLogoutBtn');
+      const acctThemeToggleBtn = document.getElementById('acctThemeToggle');
       const acctMsg = document.getElementById('acctMsg');
       const acctSuperSwitchWrap = document.getElementById('acctSuperSwitchWrap');
       const acctSuperModeEl = document.getElementById('acctSuperMode');
@@ -5127,6 +5360,14 @@
       function showAccountSuperMsg(msg = '', type = '') {
         showAccountMsg(acctSuperMsgEl, msg, type);
       }
+      function toggleThemeFromAccountSettings() {
+        const nextTheme = toggleTheme();
+        showAccountMsg(
+          acctMsg,
+          nextTheme === THEME_LIGHT ? 'Theme: Lite mood' : 'Theme: Dark mood',
+          'ok'
+        );
+      }
       function isSuperSession() {
         return String(sessionStorage.getItem(SESSION_KEY) || '').trim() === 'super';
       }
@@ -5171,7 +5412,7 @@
       }
       function syncAccountRoleSwitchSelectors({ keepTeacher = true } = {}) {
         const mode = String(acctSuperModeEl?.value || '').trim();
-        const isScopedMode = mode === 'admin' || mode === 'teacher';
+        const isScopedMode = mode === 'admin' || mode === 'teacher' || mode === 'supervisor';
         if (acctSuperTenantWrap) acctSuperTenantWrap.style.display = isScopedMode ? 'block' : 'none';
         if (acctSuperTeacherWrap) acctSuperTeacherWrap.style.display = mode === 'teacher' ? 'block' : 'none';
         if (mode === 'teacher') {
@@ -5209,7 +5450,9 @@
         try {
           await fetchAccountSuperOptions(false);
           const context = getSuperImpersonationContext();
-          const savedMode = context?.mode === 'teacher' ? 'teacher' : (context?.mode === 'admin' ? 'admin' : '');
+          const savedMode = context?.mode === 'teacher'
+            ? 'teacher'
+            : (context?.mode === 'admin' ? 'admin' : (context?.mode === 'supervisor' ? 'supervisor' : ''));
           if (acctSuperModeEl) acctSuperModeEl.value = savedMode;
           fillAccountSuperTenantSelect(context?.tenantId || '');
           fillAccountSuperTeacherSelect(context?.tenantId || '', context?.teacherId || '');
@@ -5234,13 +5477,18 @@
           return;
         }
         const tenant = acctSuperTenants.find((item) => item.id === tenantId);
-        if (mode === 'admin') {
+        if (mode === 'admin' || mode === 'supervisor') {
           activateSuperImpersonation({
-            mode: 'admin',
+            mode,
             tenantId,
             tenantName: tenant?.name || ''
-          });
-          showAccountSuperMsg(`تم الدخول كمدير: ${tenant?.name || '—'}`, 'ok');
+          }).catch(() => {});
+          showAccountSuperMsg(
+            mode === 'supervisor'
+              ? `تم الدخول كمشرف تربوي: ${tenant?.name || '—'}`
+              : `تم الدخول كمدير: ${tenant?.name || '—'}`,
+            'ok'
+          );
           closeAccountModal();
           return;
         }
@@ -5262,7 +5510,7 @@
           tenantName: tenant?.name || teacher.schoolName || '',
           teacherId,
           teacherName: teacher.displayName || teacher.username || ''
-        });
+        }).catch(() => {});
         showAccountSuperMsg(`تم الدخول كمعلم: ${teacher.displayName || teacher.username || '—'}`, 'ok');
         closeAccountModal();
       }
@@ -5293,6 +5541,7 @@
         accountModal.classList.add('visible');
         showAccountMsg(acctMsg, '', '');
         showAccountSuperMsg('', '');
+        syncThemeToggleControl();
         if (acctCurrentPassEl) acctCurrentPassEl.value = '';
         if (acctNewUserEl) acctNewUserEl.value = '';
         if (acctNewPassEl) acctNewPassEl.value = '';
@@ -5322,7 +5571,10 @@
           adminScreen.classList.remove('visible');
           if (superScreen) superScreen.classList.remove('visible');
           if (typeof loadLookups === 'function') {
-            loadLookups();
+            runStartupQuietTask(
+              () => loadLookups({ startup: true }),
+              "جارٍ تجهيز شاشة المعلم..."
+            ).catch(() => {});
           }
           updateSuperModeUi();
         } else if (role === 'admin') {
@@ -5334,7 +5586,10 @@
             adminInitialized = true;
             adminDash.init();
           }
-          adminDash.loadData();
+          runStartupQuietTask(
+            () => adminDash.loadData(),
+            "جارٍ تجهيز لوحة التحليل..."
+          ).catch(() => {});
           updateSuperModeUi();
         } else if (role === 'supervisor') {
           clearSuperImpersonationContext();
@@ -5345,7 +5600,10 @@
             adminInitialized = true;
             adminDash.init();
           }
-          adminDash.loadData();
+          runStartupQuietTask(
+            () => adminDash.loadData(),
+            "جارٍ تجهيز لوحة التحليل..."
+          ).catch(() => {});
           updateSuperModeUi();
         } else if (role === 'super') {
           teacherApp.style.display = 'none';
@@ -5355,13 +5613,15 @@
             superInitialized = true;
             window.superDash.init();
           }
-          if (window.superDash) window.superDash.loadData();
-          const savedContext = getSuperImpersonationContext();
-          if (savedContext?.mode === 'admin' || savedContext?.mode === 'teacher') {
-            activateSuperImpersonation(savedContext);
-          } else {
-            updateSuperModeUi();
-          }
+          runStartupQuietTask(async () => {
+            if (window.superDash) await window.superDash.loadData();
+            const savedContext = getSuperImpersonationContext();
+            if (savedContext?.mode === 'admin' || savedContext?.mode === 'teacher' || savedContext?.mode === 'supervisor') {
+              await activateSuperImpersonation(savedContext);
+            } else {
+              updateSuperModeUi();
+            }
+          }, "جارٍ تجهيز لوحة أدمن المنصة...").catch(() => {});
         }
       }
 
@@ -5513,6 +5773,9 @@
       if (teacherLogout) teacherLogout.addEventListener('click', doLogout);
       if (acctLogoutBtn) acctLogoutBtn.addEventListener('click', doLogout);
       if (acctSaveBtn) acctSaveBtn.addEventListener('click', updateAccount);
+      if (acctThemeToggleBtn) {
+        acctThemeToggleBtn.addEventListener('click', () => toggleThemeFromAccountSettings());
+      }
       if (acctSuperModeEl) {
         acctSuperModeEl.addEventListener('change', () => {
           syncAccountRoleSwitchSelectors({ keepTeacher: false });
