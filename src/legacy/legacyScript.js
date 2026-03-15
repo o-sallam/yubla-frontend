@@ -5299,6 +5299,7 @@
       const acctNewPassEl = document.getElementById('acctNewPass');
       const acctSaveBtn = document.getElementById('acctSaveBtn');
       const acctLogoutBtn = document.getElementById('acctLogoutBtn');
+      const acctCloseXBtn = document.getElementById('acctCloseX');
       const acctThemeToggleBtn = document.getElementById('acctThemeToggle');
       const acctMsg = document.getElementById('acctMsg');
       const acctSuperSwitchWrap = document.getElementById('acctSuperSwitchWrap');
@@ -5713,17 +5714,18 @@
       }
 
       async function updateAccount() {
-        const curPass = acctCurrentPassEl?.value;
-        const newUser = acctNewUserEl?.value;
-        const newPass = acctNewPassEl?.value;
+        const curPass = String(acctCurrentPassEl?.value || '').trim();
+        const newUser = String(acctNewUserEl?.value || '').trim();
+        const newPass = String(acctNewPassEl?.value || '').trim();
+        const hasAccountChanges = Boolean(newUser || newPass);
 
-        if (!curPass) {
-          showAccountMsg(acctMsg, 'يرجى إدخال اسم المستخدم وكلمة المرور الحالية', 'warn');
+        if (!hasAccountChanges) {
+          showAccountMsg(acctMsg, 'تم حفظ الثيم تلقائياً ولا يحتاج كلمة مرور', 'ok');
           return;
         }
 
-        if (!newUser && !newPass) {
-          showAccountMsg(acctMsg, 'أدخل اسم مستخدم جديد أو كلمة مرور جديدة', 'warn');
+        if (!curPass) {
+          showAccountMsg(acctMsg, 'يرجى إدخال كلمة المرور الحالية لتحديث بيانات الحساب', 'warn');
           return;
         }
         try {
@@ -5772,6 +5774,7 @@
       if (adminLogout) adminLogout.addEventListener('click', doLogout);
       if (teacherLogout) teacherLogout.addEventListener('click', doLogout);
       if (acctLogoutBtn) acctLogoutBtn.addEventListener('click', doLogout);
+      if (acctCloseXBtn) acctCloseXBtn.addEventListener('click', closeAccountModal);
       if (acctSaveBtn) acctSaveBtn.addEventListener('click', updateAccount);
       if (acctThemeToggleBtn) {
         acctThemeToggleBtn.addEventListener('click', () => toggleThemeFromAccountSettings());

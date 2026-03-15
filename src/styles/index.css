@@ -932,6 +932,28 @@
       padding: 8px 14px;
       font-size: 12px;
     }
+    .account-modal-header {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    .account-modal-header .modal-title {
+      justify-self: center;
+    }
+    .account-modal-close {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 10px;
+      display: inline-grid;
+      place-items: center;
+      line-height: 1;
+    }
+    .account-modal-close .lucide {
+      width: 17px;
+      height: 17px;
+    }
     .print-modal {
       max-width: 680px;
     }
