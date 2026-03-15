@@ -1,4 +1,5 @@
 ﻿    const DRAFT_KEY = "school_grades_draft_v7";
+    const LIMITS_BY_CONTEXT_KEY = "school_grades_limits_by_context_v1";
 
     const API_BASE_URL = String(
       (typeof API_BASE !== "undefined" && API_BASE) || window.__APP_API_BASE__ || "https://yubla-backend-production.up.railway.app"
@@ -63,6 +64,8 @@
     const quickNotice = $("quickNotice");
     const quickNoticeText = $("quickNoticeText");
     const quickNoticeBtn = $("quickNoticeBtn");
+    const superExitTeacherModeBtn = $("superExitTeacherMode");
+    const superExitAdminModeBtn = $("superExitAdminMode");
 
     let pendingSubmit = null;
     const DRAFT_MODULE = "teacher";
@@ -71,6 +74,8 @@
     const SESSION_TOKEN_KEY_GLOBAL = "school_session_token";
     const SESSION_USER_DISPLAY_KEY = "school_session_user_display";
     const SESSION_SCHOOL_NAME_KEY = "school_session_school_name";
+    const SUPERVISOR_TENANT_KEY = "school_supervisor_tenant_v1";
+    const SUPER_IMPERSONATION_KEY = "school_super_impersonation_v1";
     const DEFAULT_MAX_RECALL = 10;
     const DEFAULT_MAX_UNDERSTAND = 5;
     const DEFAULT_MAX_HOTS = 5;
@@ -84,7 +89,13 @@
     let rowViewTimer = null;
     let activePrintContext = "teacher";
     let voiceSnInputTimer = null;
+    let filtersAutoRefreshTimer = null;
+    let lastLoadedTableContextKey = "";
+    let lastLimitsContextKey = "";
+    let limitsByContextCache = null;
+    let limitsFetchSeq = 0;
     let tableContext = { grade: "", section: "" };
+    let teacherScopedAssignments = [];
     const rowNameCollator = new Intl.Collator("ar", { sensitivity: "base", numeric: true });
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     const supportsSpeechSynthesis =
@@ -131,15 +142,197 @@
     const iconMarkup = (name, extraClass = "") =>
       `<i data-lucide="${name}"${extraClass ? ` class="${extraClass}"` : ""} aria-hidden="true"></i>`;
 
+    let superImpersonationContext = null;
+    function getSessionRole() {
+      return String(sessionStorage.getItem(SESSION_ROLE_KEY) || "").trim();
+    }
+    function readSuperImpersonationContext() {
+      try {
+        const raw = sessionStorage.getItem(SUPER_IMPERSONATION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        const mode = String(parsed.mode || "").trim();
+        const tenantId = String(parsed.tenantId || "").trim();
+        if (!mode || !tenantId) return null;
+        return {
+          mode,
+          tenantId,
+          tenantName: String(parsed.tenantName || "").trim(),
+          teacherId: String(parsed.teacherId || "").trim(),
+          teacherName: String(parsed.teacherName || "").trim()
+        };
+      } catch (_) {
+        return null;
+      }
+    }
+    function getSuperImpersonationContext() {
+      if (getSessionRole() !== "super") return null;
+      if (superImpersonationContext === null) {
+        superImpersonationContext = readSuperImpersonationContext();
+      }
+      return superImpersonationContext;
+    }
+    function setSuperImpersonationContext(context) {
+      const mode = String(context?.mode || "").trim();
+      const tenantId = String(context?.tenantId || "").trim();
+      if (!mode || !tenantId) return;
+      superImpersonationContext = {
+        mode,
+        tenantId,
+        tenantName: String(context?.tenantName || "").trim(),
+        teacherId: String(context?.teacherId || "").trim(),
+        teacherName: String(context?.teacherName || "").trim()
+      };
+      try {
+        sessionStorage.setItem(SUPER_IMPERSONATION_KEY, JSON.stringify(superImpersonationContext));
+      } catch (_) {}
+    }
+    function clearSuperImpersonationContext() {
+      superImpersonationContext = null;
+      try {
+        sessionStorage.removeItem(SUPER_IMPERSONATION_KEY);
+      } catch (_) {}
+    }
+    function withSuperTenantUrl(path, modes = []) {
+      const url = new URL(withApiBase(path));
+      const role = getSessionRole();
+      const context = getSuperImpersonationContext();
+      const modeAllowed = !modes.length || modes.includes(context?.mode || "");
+      if (role === "super" && context?.tenantId && modeAllowed) {
+        url.searchParams.set("tenantId", context.tenantId);
+      }
+      return url.toString();
+    }
+    function setInlineStatus(el, msg = "", type = "") {
+      if (!el) return;
+      el.textContent = msg || "";
+      if (!msg) {
+        el.style.display = "none";
+        return;
+      }
+      el.className = "status-bar show" + (type ? ` ${type}` : "");
+      el.style.display = "flex";
+    }
+    function updateSuperModeUi() {
+      const context = getSuperImpersonationContext();
+      const adminBanner = $("superAdminModeBanner");
+      const teacherBanner = $("superTeacherModeBanner");
+      if (context?.mode === "admin") {
+        if (superExitAdminModeBtn) superExitAdminModeBtn.style.display = "inline-flex";
+        if (superExitTeacherModeBtn) superExitTeacherModeBtn.style.display = "none";
+        setInlineStatus(adminBanner, `وضع مدير نشط — ${context.tenantName || "مدرسة محددة"}`, "warn");
+        setInlineStatus(teacherBanner, "", "");
+      } else if (context?.mode === "teacher") {
+        if (superExitAdminModeBtn) superExitAdminModeBtn.style.display = "none";
+        if (superExitTeacherModeBtn) superExitTeacherModeBtn.style.display = "inline-flex";
+        setInlineStatus(
+          teacherBanner,
+          `وضع معلم نشط — ${context.teacherName || "معلم محدد"} (${context.tenantName || "مدرسة محددة"})`,
+          "warn"
+        );
+        setInlineStatus(adminBanner, "", "");
+      } else {
+        if (superExitAdminModeBtn) superExitAdminModeBtn.style.display = "none";
+        if (superExitTeacherModeBtn) superExitTeacherModeBtn.style.display = "none";
+        setInlineStatus(adminBanner, "", "");
+        setInlineStatus(teacherBanner, "", "");
+      }
+    }
+    function showSuperScreenOnly() {
+      const teacherApp = $("teacherApp");
+      const adminScreen = $("adminScreen");
+      const superScreen = $("superScreen");
+      if (teacherApp) teacherApp.style.display = "none";
+      if (adminScreen) adminScreen.classList.remove("visible");
+      if (superScreen) superScreen.classList.add("visible");
+      updateSuperModeUi();
+    }
+    function showAdminScreenOnly() {
+      const teacherApp = $("teacherApp");
+      const adminScreen = $("adminScreen");
+      const superScreen = $("superScreen");
+      if (teacherApp) teacherApp.style.display = "none";
+      if (superScreen) superScreen.classList.remove("visible");
+      if (adminScreen) adminScreen.classList.add("visible");
+      updateSuperModeUi();
+    }
+    function showTeacherScreenOnly() {
+      const teacherApp = $("teacherApp");
+      const adminScreen = $("adminScreen");
+      const superScreen = $("superScreen");
+      if (superScreen) superScreen.classList.remove("visible");
+      if (adminScreen) adminScreen.classList.remove("visible");
+      if (teacherApp) teacherApp.style.display = "block";
+      updateSuperModeUi();
+    }
+    function activateSuperImpersonation(context) {
+      setSuperImpersonationContext(context);
+      if ((context?.mode || "") === "admin") {
+        showAdminScreenOnly();
+        if (typeof adminDash !== "undefined") {
+          adminDash.init();
+          adminDash.loadData();
+        }
+      } else if ((context?.mode || "") === "teacher") {
+        showTeacherScreenOnly();
+        loadLookups();
+      }
+      updateSuperModeUi();
+    }
+    function exitSuperImpersonation() {
+      clearSuperImpersonationContext();
+      showSuperScreenOnly();
+      if (window.superDash) window.superDash.loadData();
+      updateSuperModeUi();
+    }
+    window.__activateSuperImpersonation = activateSuperImpersonation;
+    window.__clearSuperImpersonation = exitSuperImpersonation;
+
     /* ── Utilities ── */
+    function compactNoticeText(msg = "", sub = "") {
+      const normalize = (v) => String(v || "").replace(/\s+/g, " ").trim();
+      let text = normalize(msg) || normalize(sub);
+      const replacements = [
+        ["تم تحميل القوائم بنجاح", "تم تحديث القوائم"],
+        ["تعذر تحميل القوائم", "فشل تحديث القوائم"],
+        ["تم حفظ الإرسال بنجاح", "تم الحفظ والإرسال"],
+        ["فشل الإرسال", "فشل الحفظ والإرسال"],
+        ["تعذر تعبئة الطالبات", "فشل تعبئة الطالبات"],
+        ["تم إلغاء التعديلات غير المحفوظة", "تم إلغاء التعديلات"],
+        ["تم تفريغ القيم محليًا فقط", "تم تفريغ القيم محليًا"],
+        ["يوجد سطر بقيم متجاوزة للحد الأعلى", "العلامات خارج الحدود"]
+      ];
+      replacements.forEach(([from, to]) => {
+        if (text.includes(from)) text = text.replace(from, to);
+      });
+      return text;
+    }
     function setStatus(type, msg, sub="") {
-      statusBox.className = "status-bar show" + (type ? "" : " loading");
-      statusDot.className = "dot" + (type ? " "+type : "");
-      statusMsg.textContent = msg;
-      statusSub.textContent = sub;
+      const statusType = String(type || "").trim();
+      const statusMsgText = String(msg || "").trim();
+      const statusSubText = String(sub || "").trim();
+      const inTeacherLikeContext = isTeacherLikeMode();
+      if (inTeacherLikeContext) {
+        statusBox.className = "status-bar";
+        statusDot.className = "dot";
+        statusMsg.textContent = "";
+        statusSub.textContent = "";
+        if (!statusType || !statusMsgText) return;
+        const noticeType = statusType === "bad" ? "bad" : (statusType === "warn" ? "warn" : "info");
+        const noticeText = compactNoticeText(statusMsgText, statusSubText);
+        const timeout = statusType === "bad" ? 4600 : (statusType === "warn" ? 3600 : 3000);
+        showQuickNotice(noticeText, noticeType, timeout, { requireAck: statusType === "bad" });
+        return;
+      }
+      statusBox.className = "status-bar show" + (statusType ? "" : " loading");
+      statusDot.className = "dot" + (statusType ? ` ${statusType}` : "");
+      statusMsg.textContent = statusMsgText;
+      statusSub.textContent = statusSubText;
     }
     let loadingTimer = null;
     function startLoading(opText="") {
+      if (isTeacherLikeMode()) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("loading-error","loading-success");
@@ -153,6 +346,7 @@
       globalLoading.classList.add("visible");
     }
     function succeed(msg="تمت العملية بنجاح") {
+      if (isTeacherLikeMode()) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("loading-error");
@@ -167,6 +361,7 @@
       loadingTimer = setTimeout(() => stopLoading(), 1200);
     }
     function fail(msg="تعذر إتمام العملية") {
+      if (isTeacherLikeMode()) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("loading-success");
@@ -181,11 +376,95 @@
       globalLoading.classList.add("visible");
     }
     function stopLoading() {
+      if (isTeacherLikeMode()) return;
       if (!globalLoading) return;
       clearTimeout(loadingTimer);
       globalLoading.classList.remove("visible","loading-error","loading-success");
     }
-    function num(v) { const n=Number(v); return Number.isFinite(n)?n:0; }
+    function toWesternDigits(value) {
+      return String(value || "")
+        .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
+        .replace(/،/g, ",")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+    function num(v) {
+      const normalized = toWesternDigits(v).replace(/,/g, ".");
+      const n = Number(normalized);
+      return Number.isFinite(n) ? n : 0;
+    }
+    const ARABIC_DIGITS_REGEX = /[٠-٩۰-۹]/g;
+    const ARABIC_DIGITS_TEST_REGEX = /[٠-٩۰-۹]/;
+    const hasArabicDigits = (value) => ARABIC_DIGITS_TEST_REGEX.test(String(value || ""));
+    const stripArabicDigits = (value) => String(value || "").replace(ARABIC_DIGITS_REGEX, "");
+    function isTextEntryElement(el) {
+      if (!el) return false;
+      if (el instanceof HTMLTextAreaElement) return !el.readOnly && !el.disabled;
+      if (!(el instanceof HTMLInputElement)) return false;
+      const blockedTypes = new Set(["checkbox", "radio", "button", "submit", "reset", "file", "range", "color", "image"]);
+      return !el.readOnly && !el.disabled && !blockedTypes.has(String(el.type || "").toLowerCase());
+    }
+    function replaceSelectionText(el, text) {
+      if (!isTextEntryElement(el)) return;
+      const start = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : start;
+      const before = el.value.slice(0, start);
+      const after = el.value.slice(end);
+      el.value = `${before}${text}${after}`;
+      const cursor = start + text.length;
+      if (typeof el.setSelectionRange === "function") el.setSelectionRange(cursor, cursor);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    function enforceNoArabicDigitsInInputs() {
+      if (window.__arabicDigitsBlocked) return;
+      window.__arabicDigitsBlocked = true;
+
+      document.addEventListener(
+        "beforeinput",
+        (e) => {
+          const target = e.target;
+          if (!isTextEntryElement(target)) return;
+          const inserted = typeof e.data === "string" ? e.data : "";
+          if (!inserted || !hasArabicDigits(inserted)) return;
+          e.preventDefault();
+          const sanitized = stripArabicDigits(inserted);
+          if (sanitized) replaceSelectionText(target, sanitized);
+        },
+        true
+      );
+
+      document.addEventListener(
+        "paste",
+        (e) => {
+          const target = e.target;
+          if (!isTextEntryElement(target)) return;
+          const pasted = e.clipboardData?.getData("text") || "";
+          if (!pasted || !hasArabicDigits(pasted)) return;
+          e.preventDefault();
+          const sanitized = stripArabicDigits(pasted);
+          if (sanitized) replaceSelectionText(target, sanitized);
+        },
+        true
+      );
+
+      document.addEventListener(
+        "input",
+        (e) => {
+          const target = e.target;
+          if (!isTextEntryElement(target)) return;
+          const currentValue = String(target.value || "");
+          if (!hasArabicDigits(currentValue)) return;
+          const cursor = typeof target.selectionStart === "number" ? target.selectionStart : currentValue.length;
+          const before = currentValue.slice(0, cursor);
+          const removedBeforeCount = (before.match(ARABIC_DIGITS_REGEX) || []).length;
+          target.value = stripArabicDigits(currentValue);
+          const nextCursor = Math.max(0, cursor - removedBeforeCount);
+          if (typeof target.setSelectionRange === "function") target.setSelectionRange(nextCursor, nextCursor);
+        },
+        true
+      );
+    }
     const WEAK_SKILL_THRESHOLD_PCT = 60;
     function esc(s) {
       return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -336,10 +615,10 @@
       const belowZero = value < 0;
       const exceeded = value > safeMax;
       if (belowZero && notify && !suppressLimitNotices) {
-        showQuickNotice(`القيمة في ${label} لا يمكن أن تكون أقل من 0`, "bad", 2200);
+        showQuickNotice(`${label}: الحد الأدنى 0`, "bad", 2600);
       }
       if (exceeded && notify && !suppressLimitNotices) {
-        showQuickNotice(`القيمة في ${label} (${value}) تتجاوز الحد الأعلى ${safeMax}`, "bad", 2600);
+        showQuickNotice(`${label}: تجاوز الحد ${safeMax}`, "bad", 3000);
       }
       return belowZero || exceeded;
     }
@@ -359,7 +638,7 @@
         if (isExceeded) exceeded = true;
       });
       if (shouldNotify && exceeded) {
-        showQuickNotice("يوجد قيم متجاوزة للحدود المسموحة", "bad", 2200);
+        showQuickNotice("توجد قيم خارج الحدود", "bad", 2600);
       }
       return exceeded;
     }
@@ -371,7 +650,7 @@
         if (exceeded) exceededRows += 1;
       });
       if (shouldNotify && exceededRows > 0) {
-        showQuickNotice(`يوجد ${exceededRows} سطر خارج الحدود`, "bad", 2200);
+        showQuickNotice(`${exceededRows} صف خارج الحدود`, "bad", 2800);
       }
       return exceededRows;
     }
@@ -1085,10 +1364,10 @@
         return 0;
       }
       if (bad === 0) {
-        validChip.innerHTML = `${iconMarkup("circle-check-big")}<span>جميع الدرجات ضمن الحدود</span>`;
+        validChip.innerHTML = `${iconMarkup("circle-check-big")}<span>العلامات ضمن الحدود</span>`;
         validChip.className = "chip ok";
       } else {
-        validChip.innerHTML = `${iconMarkup("circle-x")}<span>يوجد ${bad} سطر خارج الحدود</span>`;
+        validChip.innerHTML = `${iconMarkup("circle-x")}<span>العلامات خارج الحدود</span>`;
         validChip.className = "chip bad";
       }
       renderLucideIcons();
@@ -1100,8 +1379,309 @@
     function updateAutoFillButtonState() {
       const btn = $("btnAutoFill");
       if (!btn) return;
-      btn.innerHTML = `${iconMarkup("refresh-cw")}<span>تحديث الطالبات حسب الصف/الشعبة الحالية</span>`;
+      btn.innerHTML = `${iconMarkup("refresh-cw")}<span>تحديث الجدول الآن</span>`;
       renderLucideIcons();
+    }
+    function isTeacherLikeMode() {
+      const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+      const superModeContext = getSuperImpersonationContext();
+      return currentRole === "teacher" || (currentRole === "super" && superModeContext?.mode === "teacher");
+    }
+    function getCurrentTableContext() {
+      return {
+        teacher: teacherSel.value.trim(),
+        grade: gradeSel.value.trim(),
+        section: sectionSel.value.trim(),
+        subject: subjectSel.value.trim(),
+        exam: examSel.value.trim()
+      };
+    }
+    function hasFullTableContext(ctx) {
+      return !!(ctx.teacher && ctx.grade && ctx.section && ctx.subject && ctx.exam);
+    }
+    function makeTableContextKey(ctx) {
+      return [ctx.teacher, ctx.grade, ctx.section, ctx.subject, ctx.exam].join("|");
+    }
+    function getDefaultLimitsPayload() {
+      const maxRecall = Math.max(0, num(DEFAULT_MAX_RECALL));
+      const maxUnderstand = Math.max(0, num(DEFAULT_MAX_UNDERSTAND));
+      const maxHots = Math.max(0, num(DEFAULT_MAX_HOTS));
+      return {
+        maxRecall,
+        maxUnderstand,
+        maxHots,
+        totalMax: maxRecall + maxUnderstand + maxHots
+      };
+    }
+    function normalizeLimitsPayload(payload = {}) {
+      const defaults = getDefaultLimitsPayload();
+      const maxRecall = Math.max(0, num(payload.maxRecall ?? defaults.maxRecall));
+      const maxUnderstand = Math.max(0, num(payload.maxUnderstand ?? defaults.maxUnderstand));
+      const maxHots = Math.max(0, num(payload.maxHots ?? defaults.maxHots));
+      const totalCandidate = num(payload.totalMax);
+      const totalMax = totalCandidate > 0 ? totalCandidate : (maxRecall + maxUnderstand + maxHots);
+      return { maxRecall, maxUnderstand, maxHots, totalMax };
+    }
+    function getCurrentLimitsPayload() {
+      return normalizeLimitsPayload({
+        maxRecall: maxRecallEl.value,
+        maxUnderstand: maxUnderstandEl.value,
+        maxHots: maxHotsEl.value,
+        totalMax: totalMaxEl.value
+      });
+    }
+    function applyLimitsPayload(payload, options = {}) {
+      const next = normalizeLimitsPayload(payload || {});
+      maxRecallEl.value = String(next.maxRecall);
+      maxUnderstandEl.value = String(next.maxUnderstand);
+      maxHotsEl.value = String(next.maxHots);
+      computeTotalMax();
+      validateAllRows();
+      const badRows = updateValidationChip();
+      if (options.showOverflowStatus !== false && badRows > 0) {
+        setStatus("bad", `يوجد ${badRows} سطر بقيم متجاوزة للحد الأعلى`, "تم تلوين القيم المتجاوزة بالأحمر دون تعديلها");
+      }
+      return badRows;
+    }
+    function loadLimitsByContextMap() {
+      if (limitsByContextCache && typeof limitsByContextCache === "object") return limitsByContextCache;
+      try {
+        const raw = localStorage.getItem(LIMITS_BY_CONTEXT_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            limitsByContextCache = parsed;
+            return limitsByContextCache;
+          }
+        }
+      } catch (_) {}
+      limitsByContextCache = {};
+      return limitsByContextCache;
+    }
+    function saveLimitsByContextMap(map) {
+      limitsByContextCache = map && typeof map === "object" ? map : {};
+      try {
+        localStorage.setItem(LIMITS_BY_CONTEXT_KEY, JSON.stringify(limitsByContextCache));
+      } catch (_) {}
+    }
+    function getSavedLimitsForContext(ctx) {
+      if (!hasFullTableContext(ctx)) return null;
+      const key = makeTableContextKey(ctx);
+      const map = loadLimitsByContextMap();
+      if (!map[key]) return null;
+      return normalizeLimitsPayload(map[key]);
+    }
+    function saveLimitsForContextKey(contextKey, payload) {
+      const key = String(contextKey || "").trim();
+      if (!key) return;
+      const map = loadLimitsByContextMap();
+      map[key] = normalizeLimitsPayload(payload || getCurrentLimitsPayload());
+      saveLimitsByContextMap(map);
+    }
+    function saveCurrentLimitsForContext(ctx = getCurrentTableContext()) {
+      if (!hasFullTableContext(ctx)) return;
+      const key = makeTableContextKey(ctx);
+      lastLimitsContextKey = key;
+      saveLimitsForContextKey(key, getCurrentLimitsPayload());
+    }
+    async function fetchLatestLimitsForContextFromSubmissions(ctx) {
+      if (!hasFullTableContext(ctx)) return null;
+      const normalize = (v) => String(v || "").trim();
+      const res = await apiGet({ action: "submissions" });
+      const rows = Array.isArray(res?.rows) ? res.rows : [];
+      if (!rows.length) return null;
+
+      let latest = null;
+      for (const r of rows) {
+        if (
+          normalize(r?.[2]) !== ctx.teacher ||
+          normalize(r?.[3]) !== ctx.grade ||
+          normalize(r?.[4]) !== ctx.section ||
+          normalize(r?.[5]) !== ctx.subject ||
+          normalize(r?.[6]) !== ctx.exam
+        ) {
+          continue;
+        }
+        const timestamp = normalize(r?.[0]);
+        if (!latest || timestamp > latest.timestamp) {
+          latest = {
+            timestamp,
+            maxRecall: r?.[7],
+            maxUnderstand: r?.[8],
+            maxHots: r?.[9],
+            totalMax: r?.[10]
+          };
+        }
+      }
+      if (!latest) return null;
+      return normalizeLimitsPayload(latest);
+    }
+    async function applyLimitsForContext(ctx = getCurrentTableContext(), options = {}) {
+      if (!hasFullTableContext(ctx)) {
+        lastLimitsContextKey = "";
+        return false;
+      }
+      const contextKey = makeTableContextKey(ctx);
+      lastLimitsContextKey = contextKey;
+
+      const cached = getSavedLimitsForContext(ctx);
+      if (cached) {
+        applyLimitsPayload(cached, { showOverflowStatus: false });
+        return true;
+      }
+
+      applyLimitsPayload(getDefaultLimitsPayload(), { showOverflowStatus: false });
+      if (options.allowSubmissionFallback === false) {
+        saveLimitsForContextKey(contextKey, getCurrentLimitsPayload());
+        return false;
+      }
+
+      const requestSeq = ++limitsFetchSeq;
+      try {
+        const latest = await fetchLatestLimitsForContextFromSubmissions(ctx);
+        if (requestSeq !== limitsFetchSeq) return false;
+        if (latest) {
+          saveLimitsForContextKey(contextKey, latest);
+          applyLimitsPayload(latest, { showOverflowStatus: false });
+          return true;
+        }
+      } catch (_) {
+        if (requestSeq !== limitsFetchSeq) return false;
+      }
+
+      saveLimitsForContextKey(contextKey, getCurrentLimitsPayload());
+      return false;
+    }
+    async function fetchTeacherAssignmentsForSuper(teacherId) {
+      const safeTeacherId = String(teacherId || "").trim();
+      if (!safeTeacherId) return [];
+      const res = await fetch(withApiBase(`/api/v1/super/teachers/${encodeURIComponent(safeTeacherId)}/assignments`), {
+        method: "GET",
+        headers: getAuthHeaders()
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "تعذر تحميل إسنادات المعلم");
+      return Array.isArray(data?.assignments) ? data.assignments : [];
+    }
+    function normalizeTeacherAssignments(rows = []) {
+      const normalize = (v) => String(v || "").trim();
+      const unique = new Map();
+      (rows || []).forEach((row) => {
+        const grade = normalize(row?.grade);
+        const section = normalize(row?.section);
+        const subject = normalize(row?.subject);
+        if (!grade || !section || !subject) return;
+        const key = `${grade}|${section}|${subject}`;
+        if (unique.has(key)) return;
+        unique.set(key, { grade, section, subject });
+      });
+      return Array.from(unique.values());
+    }
+    async function fetchTeacherAssignmentsForCurrentMode() {
+      const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+      const superModeContext = getSuperImpersonationContext();
+      if (currentRole === "teacher") {
+        const res = await fetch(withApiBase("/api/v1/teacher/assignments"), {
+          method: "GET",
+          headers: getAuthHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "تعذر تحميل إسنادات المعلم");
+        return normalizeTeacherAssignments(data?.assignments || []);
+      }
+      if (currentRole === "super" && superModeContext?.mode === "teacher" && superModeContext?.teacherId) {
+        const rows = await fetchTeacherAssignmentsForSuper(superModeContext.teacherId);
+        return normalizeTeacherAssignments(rows);
+      }
+      return [];
+    }
+    function applyTeacherAssignmentLinkedFilters(preferred = {}) {
+      if (!isTeacherLikeMode() || !teacherScopedAssignments.length) return;
+      const normalize = (v) => String(v || "").trim();
+      const uniq = (arr) => [...new Set((arr || []).map((v) => normalize(v)).filter(Boolean))];
+
+      const preferredGrade = normalize(preferred.grade || gradeSel.value);
+      const gradeOptions = uniq(teacherScopedAssignments.map((row) => row.grade));
+      fillSelect(gradeSel, gradeOptions, "— اختر الصف —");
+      gradeSel.value = gradeOptions.includes(preferredGrade) ? preferredGrade : (gradeOptions[0] || "");
+
+      const preferredSection = normalize(preferred.section || sectionSel.value);
+      const sectionOptions = uniq(
+        teacherScopedAssignments
+          .filter((row) => row.grade === gradeSel.value)
+          .map((row) => row.section)
+      );
+      fillSelect(sectionSel, sectionOptions, "— اختر الشعبة —");
+      sectionSel.value = sectionOptions.includes(preferredSection) ? preferredSection : (sectionOptions[0] || "");
+
+      const preferredSubject = normalize(preferred.subject || subjectSel.value);
+      const subjectOptions = uniq(
+        teacherScopedAssignments
+          .filter((row) => row.grade === gradeSel.value && row.section === sectionSel.value)
+          .map((row) => row.subject)
+      );
+      fillSelect(subjectSel, subjectOptions, "— اختر المادة —");
+      subjectSel.value = subjectOptions.includes(preferredSubject) ? preferredSubject : (subjectOptions[0] || "");
+    }
+    async function hydrateDefaultFiltersForTeacherMode() {
+      if (!isTeacherLikeMode()) return;
+      const current = getCurrentTableContext();
+      if (hasFullTableContext(current)) return;
+
+      const teacherName = current.teacher || teacherSel.value.trim();
+      let latest = null;
+      if (teacherName) {
+        try {
+          const subRes = await apiGet({ action: "submissions" });
+          const rows = Array.isArray(subRes?.rows) ? subRes.rows : [];
+          const normalize = (v) => String(v || "").trim();
+          const matched = rows
+            .filter((r) => normalize(r?.[2]) === teacherName)
+            .sort((a, b) => String(b?.[0] || "").localeCompare(String(a?.[0] || "")));
+          if (matched.length) {
+            latest = {
+              grade: normalize(matched[0]?.[3]),
+              section: normalize(matched[0]?.[4]),
+              subject: normalize(matched[0]?.[5]),
+              exam: normalize(matched[0]?.[6])
+            };
+          }
+        } catch (_) {}
+      }
+
+      const ensureValue = (sel, preferred = "") => {
+        if (!sel) return;
+        if (String(sel.value || "").trim()) return;
+        const options = Array.from(sel.options || []).map((o) => String(o.value || "").trim()).filter(Boolean);
+        if (!options.length) return;
+        const next = preferred && options.includes(preferred) ? preferred : options[0];
+        sel.value = next;
+      };
+
+      ensureValue(gradeSel, latest?.grade || "");
+      ensureValue(sectionSel, latest?.section || "");
+      ensureValue(subjectSel, latest?.subject || "");
+      ensureValue(examSel, latest?.exam || "");
+    }
+    async function refreshTableFromFilters(options = {}) {
+      const force = Boolean(options.force);
+      const quietIncomplete = options.quietIncomplete !== false;
+      const context = getCurrentTableContext();
+      if (!hasFullTableContext(context)) {
+        if (!quietIncomplete) setStatus("warn", "يرجى اختيار الصف والشعبة والمادة والامتحان");
+        return false;
+      }
+      const key = makeTableContextKey(context);
+      if (!force && key === lastLoadedTableContextKey) return true;
+      const loaded = await autoFillStudents({ quietIncomplete, force });
+      if (loaded) lastLoadedTableContextKey = key;
+      return loaded;
+    }
+    function scheduleRefreshTableFromFilters(options = {}) {
+      clearTimeout(filtersAutoRefreshTimer);
+      filtersAutoRefreshTimer = setTimeout(() => {
+        refreshTableFromFilters(options).catch(() => {});
+      }, 220);
     }
 
     /* ── API ── */
@@ -1114,13 +1694,16 @@
     async function apiGet(p) {
       const action = p?.action || "";
       if (action === "lookups") {
-        const res = await fetch(withApiBase("/api/v1/lookups"), { method: "GET", headers: getAuthHeaders() });
+        const res = await fetch(withSuperTenantUrl("/api/v1/lookups", ["teacher", "admin"]), {
+          method: "GET",
+          headers: getAuthHeaders()
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
         return data;
       }
       if (action === "students") {
-        const url = new URL(withApiBase("/api/v1/students"));
+        const url = new URL(withSuperTenantUrl("/api/v1/students", ["teacher"]));
         url.searchParams.set("grade", p.grade || "");
         url.searchParams.set("section", p.section || "");
         const res = await fetch(url.toString(), { method: "GET", headers: getAuthHeaders() });
@@ -1129,7 +1712,10 @@
         return data;
       }
       if (action === "submissions") {
-        const res = await fetch(withApiBase("/api/v1/submissions"), { method: "GET", headers: getAuthHeaders() });
+        const res = await fetch(withSuperTenantUrl("/api/v1/submissions", ["teacher", "admin"]), {
+          method: "GET",
+          headers: getAuthHeaders()
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || "فشل الاتصال");
         return data;
@@ -1138,7 +1724,7 @@
     }
     async function apiPost(body) {
       if (body?.action === "submit") {
-        const res = await fetch(withApiBase("/api/v1/submissions"), {
+        const res = await fetch(withSuperTenantUrl("/api/v1/submissions", ["teacher"]), {
           method: "POST",
           headers: getAuthHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ header: body.header, rows: body.rows })
@@ -1172,16 +1758,48 @@
         const j=await apiGet({action:"lookups"});
         if(!j.ok) throw new Error(j.error||"فشل");
         const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
+        const superModeContext = getSuperImpersonationContext();
+        const isSuperTeacherMode = currentRole === "super" && superModeContext?.mode === "teacher";
         const sessionDisplayName = String(sessionStorage.getItem(SESSION_USER_DISPLAY_KEY) || "").trim();
         const sessionUsername = String(sessionStorage.getItem("school_session_user") || "").trim();
         const teacherIdentity = sessionDisplayName || sessionUsername;
-        fillSelect(teacherSel, j.teachers||[], "— اختر المعلمة —");
-        fillSelect(gradeSel,   j.grades||[],   "— اختر الصف —");
-        fillSelect(sectionSel, j.sections||[], "— اختر الشعبة —");
-        fillSelect(subjectSel, j.subjects||[], "— اختر المادة —");
-        fillSelect(examSel,    j.exams||[],    "— اختر الامتحان —");
+        const normalize = (v) => String(v || "").trim();
+        const uniq = (arr) => [...new Set((arr || []).map((v) => normalize(v)).filter(Boolean))];
+        const forcedTeacherName = String(superModeContext?.teacherName || "").trim();
+
+        let teachersOptions = uniq(j.teachers || []);
+        let gradesOptions = uniq(j.grades || []);
+        let sectionsOptions = uniq(j.sections || []);
+        let subjectsOptions = uniq(j.subjects || []);
+        let examsOptions = uniq(j.exams || []);
+
+        teacherScopedAssignments = [];
+        if (isTeacherLikeMode()) {
+          try {
+            teacherScopedAssignments = await fetchTeacherAssignmentsForCurrentMode();
+          } catch (_) {
+            teacherScopedAssignments = [];
+          }
+        }
+        if (isSuperTeacherMode && forcedTeacherName) {
+          teachersOptions = [forcedTeacherName];
+        }
+        if (teacherScopedAssignments.length) {
+          const scopedGrades = uniq(teacherScopedAssignments.map((row) => row.grade));
+          const scopedSections = uniq(teacherScopedAssignments.map((row) => row.section));
+          const scopedSubjects = uniq(teacherScopedAssignments.map((row) => row.subject));
+          if (scopedGrades.length) gradesOptions = scopedGrades;
+          if (scopedSections.length) sectionsOptions = scopedSections;
+          if (scopedSubjects.length) subjectsOptions = scopedSubjects;
+        }
+
+        fillSelect(teacherSel, teachersOptions, "— اختر المعلمة —");
+        fillSelect(gradeSel, gradesOptions, "— اختر الصف —");
+        fillSelect(sectionSel, sectionsOptions, "— اختر الشعبة —");
+        fillSelect(subjectSel, subjectsOptions, "— اختر المادة —");
+        fillSelect(examSel, examsOptions, "— اختر الامتحان —");
         if (lastDraftHeader) {
-          if (currentRole !== "teacher") {
+          if (currentRole !== "teacher" && !isSuperTeacherMode) {
             teacherSel.value = lastDraftHeader.teacherName || "";
           }
           gradeSel.value = lastDraftHeader.grade || "";
@@ -1189,7 +1807,19 @@
           subjectSel.value = lastDraftHeader.subject || "";
           examSel.value = lastDraftHeader.exam || "";
         }
-        if (currentRole === "teacher") {
+        if (isSuperTeacherMode) {
+          if (forcedTeacherName) {
+            const values = teachersOptions || [];
+            if (!values.includes(forcedTeacherName)) {
+              const opt = document.createElement("option");
+              opt.value = forcedTeacherName;
+              opt.textContent = forcedTeacherName;
+              teacherSel.appendChild(opt);
+            }
+            teacherSel.value = forcedTeacherName;
+          }
+          teacherSel.disabled = true;
+        } else if (currentRole === "teacher") {
           if (teacherIdentity) {
             const values = (j.teachers || []);
             if (!values.includes(teacherIdentity)) {
@@ -1208,8 +1838,23 @@
           teacherSel.disabled = true;
         } else {
           teacherSel.disabled = false;
-          if ((j.teachers || []).length === 1 && !teacherSel.value) teacherSel.value = j.teachers[0];
+          if ((teachersOptions || []).length === 1 && !teacherSel.value) teacherSel.value = teachersOptions[0];
         }
+
+        applyTeacherAssignmentLinkedFilters({
+          grade: gradeSel.value,
+          section: sectionSel.value,
+          subject: subjectSel.value
+        });
+        await hydrateDefaultFiltersForTeacherMode();
+        applyTeacherAssignmentLinkedFilters({
+          grade: gradeSel.value,
+          section: sectionSel.value,
+          subject: subjectSel.value
+        });
+        await applyLimitsForContext(getCurrentTableContext(), { allowSubmissionFallback: true });
+        await refreshTableFromFilters({ force: true, quietIncomplete: true });
+
         setStatus("ok","تم تحميل القوائم بنجاح");
         succeed("تم تحديث القوائم بنجاح");
         scheduleDraftSave();
@@ -1218,14 +1863,29 @@
         fail("تعذر تحديث القوائم");
       }
     }
-    async function autoFillStudents() {
+    async function autoFillStudents(options = {}) {
+      const quietIncomplete = options.quietIncomplete !== false;
+      const force = Boolean(options.force);
       try {
         const grade=gradeSel.value.trim(), section=sectionSel.value.trim();
         const missingGrade = !grade;
         const missingSection = !section;
-        if(missingGrade && missingSection) { setStatus("warn","يرجى اختيار الصف والشعبة"); return; }
-        if(missingGrade) { setStatus("warn","يرجى اختيار الصف"); return; }
-        if(missingSection) { setStatus("warn","يرجى اختيار الشعبة"); return; }
+        if(missingGrade && missingSection) {
+          if (!quietIncomplete) setStatus("warn","يرجى اختيار الصف والشعبة");
+          return false;
+        }
+        if(missingGrade) {
+          if (!quietIncomplete) setStatus("warn","يرجى اختيار الصف");
+          return false;
+        }
+        if(missingSection) {
+          if (!quietIncomplete) setStatus("warn","يرجى اختيار الشعبة");
+          return false;
+        }
+        const contextKey = makeTableContextKey(getCurrentTableContext());
+        if (!force && contextKey === lastLoadedTableContextKey && getStudentRows().length > 0) {
+          return true;
+        }
         startLoading("جارٍ جلب أسماء الطالبات...");
         setStatus("","جاري تعبئة الأسماء...",`${grade} / ${section}`);
         const j=await apiGet({action:"students",grade,section});
@@ -1233,15 +1893,18 @@
         const list=j.students||[];
         setRows(list);
         const restored = await hydrateRowsFromLatestSubmission();
+        lastLoadedTableContextKey = contextKey;
         if (restored > 0) {
           setStatus("ok", `تمت تعبئة ${list.length} طالبة`, `تم استرجاع آخر إرسال (${restored} طالبة)`);
         } else {
           setStatus("ok",`تمت تعبئة ${list.length} طالبة`);
         }
         succeed("تم جلب البيانات بنجاح");
+        return true;
       } catch(e) {
         setStatus("bad","تعذر تعبئة الطالبات",e.message);
         fail("تعذر جلب البيانات");
+        return false;
       }
     }
     async function hydrateRowsFromLatestSubmission() {
@@ -1412,10 +2075,12 @@
       if(!st) return null;
       if(st.module && st.module !== DRAFT_MODULE) return null;
       const h=st.header||{};
-      maxRecallEl.value=h.maxRecall??maxRecallEl.value;
-      maxUnderstandEl.value=h.maxUnderstand??maxUnderstandEl.value;
-      maxHotsEl.value=h.maxHots??maxHotsEl.value;
-      computeTotalMax();
+      applyLimitsPayload({
+        maxRecall: h.maxRecall ?? maxRecallEl.value,
+        maxUnderstand: h.maxUnderstand ?? maxUnderstandEl.value,
+        maxHots: h.maxHots ?? maxHotsEl.value,
+        totalMax: h.totalMax ?? totalMaxEl.value
+      }, { showOverflowStatus: false });
       tbody.innerHTML="";
       (st.rows||[]).forEach((r,i)=>tbody.appendChild(makeRow(r,i+1)));
       renderLucideIcons();
@@ -1429,6 +2094,17 @@
       updateValidationChip();
       updateAutoFillButtonState();
       if(st.lastBatch) lastBatch.textContent=st.lastBatch;
+      const draftContext = {
+        teacher: String(h.teacherName || "").trim(),
+        grade: String(h.grade || "").trim(),
+        section: String(h.section || "").trim(),
+        subject: String(h.subject || "").trim(),
+        exam: String(h.exam || "").trim()
+      };
+      if (hasFullTableContext(draftContext)) {
+        const draftContextKey = makeTableContextKey(draftContext);
+        saveLimitsForContextKey(draftContextKey, getCurrentLimitsPayload());
+      }
       return h;
     }
     function saveDraftSoft() {
@@ -1456,6 +2132,8 @@
       tbody.innerHTML = "";
       selectedRowId = "";
       voiceState.activeRowId = "";
+      lastLoadedTableContextKey = "";
+      lastLimitsContextKey = "";
       tableContext = { grade: "", section: "" };
       clearGridUndoHistory();
       clearGridSelection(true);
@@ -1463,7 +2141,7 @@
       updateValidationChip();
       updateAutoFillButtonState();
       lastBatch.textContent = "—";
-      setStatus("warn","تم تفريغ القيم محليًا فقط","لن يتم حفظ التفريغ في قاعدة البيانات إلا بعد الضغط على إرسال البيانات");
+      setStatus("warn","تم تفريغ القيم محليًا فقط","لن يتم حفظ التفريغ في قاعدة البيانات إلا بعد الضغط على حفظ وارسال");
       if (shouldReload) {
         setTimeout(() => window.location.reload(), 150);
       }
@@ -2692,9 +3370,6 @@
                 <tr><td class="align-right">ضعف في مهارة واحدة</td><td>${weakOne}</td><td>${pctText(weakOne)}</td></tr>
                 <tr><td class="align-right">ضعف في مهارتين</td><td>${weakTwo}</td><td>${pctText(weakTwo)}</td></tr>
                 <tr><td class="align-right">ضعف عام</td><td>${weakAll}</td><td>${pctText(weakAll)}</td></tr>
-                <tr><td class="align-right">عدد الخطط العلاجية</td><td>${plans}</td><td>${pctText(plans)}</td></tr>
-                <tr><td class="align-right">الطالبات المدخلة علاماتهن</td><td>${entered}</td><td>${pctText(entered)}</td></tr>
-                <tr><td class="align-right">الطالبات الناقصات علامات</td><td>${missing}</td><td>${pctText(missing)}</td></tr>
               </tbody>
             </table>
           </section>
@@ -2776,6 +3451,74 @@
       return { ok: true, title };
     }
 
+    function printWithIsolatedFrame(title = "") {
+      const content = printSheet?.innerHTML || "";
+      if (!content) return false;
+
+      const styleNodes = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+        .map((node) => node.outerHTML)
+        .join("\n");
+      const safeTitle = esc(title || "طباعة");
+
+      const frame = document.createElement("iframe");
+      frame.setAttribute("aria-hidden", "true");
+      frame.style.position = "fixed";
+      frame.style.left = "0";
+      frame.style.bottom = "0";
+      frame.style.width = "0";
+      frame.style.height = "0";
+      frame.style.border = "0";
+      frame.style.opacity = "0";
+      frame.style.pointerEvents = "none";
+
+      const cleanup = () => {
+        setTimeout(() => {
+          if (frame.parentNode) frame.parentNode.removeChild(frame);
+        }, 160);
+      };
+
+      frame.srcdoc = `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${safeTitle}</title>
+  ${styleNodes}
+</head>
+<body>
+  <div id="printSheet">${content}</div>
+</body>
+</html>`;
+
+      frame.addEventListener(
+        "load",
+        () => {
+          const frameWin = frame.contentWindow;
+          if (!frameWin) {
+            cleanup();
+            return;
+          }
+          const done = () => cleanup();
+          try {
+            frameWin.addEventListener("afterprint", done, { once: true });
+          } catch (_) {}
+          setTimeout(() => {
+            try {
+              frameWin.focus();
+              frameWin.print();
+            } catch (_) {
+              cleanup();
+            }
+          }, 80);
+          setTimeout(cleanup, 60000);
+        },
+        { once: true }
+      );
+
+      document.body.appendChild(frame);
+      return true;
+    }
+
     function startPrintMode(mode) {
       const res = buildPrintSheetForMode(mode);
       if (!res.ok) {
@@ -2783,7 +3526,11 @@
         return;
       }
       closePrintModalBox();
-      setTimeout(() => window.print(), 60);
+      const started = printWithIsolatedFrame(res.title);
+      if (!started) {
+        showQuickNotice("تعذر بدء الطباعة", "warn", 2200);
+      }
+      clearPrintSheet();
     }
 
     function clearPrintSheet() {
@@ -2794,6 +3541,7 @@
     function boot() {
       if (window.__legacyBooted) return;
       window.__legacyBooted = true;
+      enforceNoArabicDigitsInInputs();
       renderLucideIcons();
       computeTotalMax();
       ["teacher","grade","section","subject","exam"].forEach(id=>fillSelect($(id),[],"— اختر —"));
@@ -2807,7 +3555,9 @@
           if (h) {
             setTimeout(()=>{
               const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
-              if (currentRole !== "teacher") {
+              const superModeContext = getSuperImpersonationContext();
+              const isSuperTeacherMode = currentRole === "super" && superModeContext?.mode === "teacher";
+              if (currentRole !== "teacher" && !isSuperTeacherMode) {
                 teacherSel.value=h.teacherName||"";
               }
               gradeSel.value=h.grade||"";
@@ -2827,28 +3577,32 @@
           try {
             const d=JSON.parse(raw2), h=d.header||{};
             const currentRole = sessionStorage.getItem(SESSION_ROLE_KEY) || "";
-            if (currentRole !== "teacher") {
+            const superModeContext = getSuperImpersonationContext();
+            const isSuperTeacherMode = currentRole === "super" && superModeContext?.mode === "teacher";
+            if (currentRole !== "teacher" && !isSuperTeacherMode) {
               teacherSel.value=h.teacherName||"";
             }
             gradeSel.value=h.grade||"";
             sectionSel.value=h.section||""; subjectSel.value=h.subject||""; examSel.value=h.exam||"";
-            scheduleDraftSave(); validateAllRows();
+            await applyLimitsForContext(getCurrentTableContext(), { allowSubmissionFallback: true });
+            scheduleDraftSave();
           } catch(_){}
         }
-        const hasFullContext =
-          !!teacherSel.value.trim() &&
-          !!gradeSel.value.trim() &&
-          !!sectionSel.value.trim() &&
-          !!subjectSel.value.trim() &&
-          !!examSel.value.trim();
-        if (hasFullContext) {
-          await autoFillStudents();
-        }
+        await applyLimitsForContext(getCurrentTableContext(), { allowSubmissionFallback: true });
+        await refreshTableFromFilters({ force: true, quietIncomplete: true });
       });
-      $("btnAutoFill").addEventListener("click", ()=>{ autoFillStudents(); });
+      $("btnAutoFill").addEventListener("click", ()=>{ autoFillStudents({ quietIncomplete: false, force: true }); });
       $("btnSubmit").addEventListener("click", handleSubmit);
-      $("btnClearScores").addEventListener("click", ()=>{
-        if(confirm("مسح الدرجات والخطة فقط؟ (الأسماء ستبقى)")) { clearScoresOnly(); setStatus("warn","تم مسح الدرجات فقط"); }
+      if (superExitTeacherModeBtn) superExitTeacherModeBtn.addEventListener("click", () => exitSuperImpersonation());
+      if (superExitAdminModeBtn) superExitAdminModeBtn.addEventListener("click", () => exitSuperImpersonation());
+      $("btnClearScores").addEventListener("click", async ()=>{
+        if (!confirm("إلغاء التعديلات غير المحفوظة وإعادة تحميل آخر بيانات؟")) return;
+        const canceled = await refreshTableFromFilters({ force: true, quietIncomplete: false });
+        if (canceled) {
+          setStatus("ok","تم إلغاء التعديلات");
+        } else {
+          setStatus("bad","تعذر إلغاء التعديلات");
+        }
       });
       if (studentSearchInput) {
         studentSearchInput.addEventListener("input", () => {
@@ -2923,14 +3677,31 @@
         if (badRows > 0) {
           setStatus("bad", `يوجد ${badRows} سطر بقيم متجاوزة للحد الأعلى`, "تم تلوين القيم المتجاوزة بالأحمر دون تعديلها");
         }
+        saveCurrentLimitsForContext();
+        saveDraftSoft();
         scheduleDraftSave();
       }));
       [teacherSel,gradeSel,sectionSel,subjectSel,examSel].forEach(s=>{
         s.addEventListener("change",()=>{
-          scheduleDraftSave();
+          if (s === gradeSel) {
+            applyTeacherAssignmentLinkedFilters({ grade: gradeSel.value, section: "", subject: "" });
+          } else if (s === sectionSel) {
+            applyTeacherAssignmentLinkedFilters({ grade: gradeSel.value, section: sectionSel.value, subject: "" });
+          }
+          const contextSnapshot = getCurrentTableContext();
+          const contextKeySnapshot = makeTableContextKey(contextSnapshot);
           updateAutoFillButtonState();
           refreshStudentRowsView({ skipSort: true });
-          if(s===gradeSel||s===sectionSel) setStatus("warn","تم تغيير الصف/الشعبة","اضغط (تعبئة تلقائية) لتحديث قائمة الطالبات");
+          if(s===gradeSel||s===sectionSel||s===subjectSel||s===examSel) {
+            setStatus("","جاري تحديث الجدول حسب الفلاتر...");
+          }
+          applyLimitsForContext(contextSnapshot, { allowSubmissionFallback: true })
+            .catch(()=>{})
+            .finally(() => {
+              if (makeTableContextKey(getCurrentTableContext()) !== contextKeySnapshot) return;
+              scheduleDraftSave();
+              scheduleRefreshTableFromFilters({ force: false, quietIncomplete: true });
+            });
         });
       });
 
@@ -2938,6 +3709,7 @@
       updateAutoFillButtonState();
       refreshStudentRowsView({ skipSort: true });
       updateVoicePanelInfo();
+      updateSuperModeUi();
 
       window.addEventListener("afterprint", clearPrintSheet);
       window.addEventListener("beforeunload", ()=>{
@@ -2955,6 +3727,8 @@
       let allRows = [];
       let filteredRows = [];
       let assignmentRows = [];
+      let supervisorTenants = [];
+      let initialized = false;
       let adminTableScrollSyncBound = false;
       let syncingTopScroll = false;
       let syncingBottomScroll = false;
@@ -3139,6 +3913,62 @@
         if (Math.abs(topScroll.scrollLeft - tableScroll.scrollLeft) > 1) {
           topScroll.scrollLeft = tableScroll.scrollLeft;
         }
+      }
+
+      function isSupervisorRole() {
+        return String(sessionStorage.getItem(SESSION_ROLE_KEY) || "").trim() === "supervisor";
+      }
+
+      function getSupervisorTenantId() {
+        return String(sessionStorage.getItem(SUPERVISOR_TENANT_KEY) || "").trim();
+      }
+
+      function setSupervisorTenantId(tenantId = "") {
+        const nextTenantId = String(tenantId || "").trim();
+        try {
+          if (nextTenantId) sessionStorage.setItem(SUPERVISOR_TENANT_KEY, nextTenantId);
+          else sessionStorage.removeItem(SUPERVISOR_TENANT_KEY);
+        } catch (_) {}
+      }
+
+      function updateSupervisorWelcome(tenantId = "") {
+        if (!isSupervisorRole()) return;
+        const welcomeEl = document.getElementById("adminWelcomeText");
+        const tenant = supervisorTenants.find((item) => item.id === tenantId);
+        const schoolName = String(tenant?.name || "").trim();
+        try {
+          if (schoolName) sessionStorage.setItem(SESSION_SCHOOL_NAME_KEY, schoolName);
+          else sessionStorage.removeItem(SESSION_SCHOOL_NAME_KEY);
+        } catch (_) {}
+        if (welcomeEl) {
+          welcomeEl.textContent = "أهلاً المشرف التربوي";
+        }
+      }
+
+      function fillSupervisorTenantSelect() {
+        const wrap = document.getElementById("af-tenant-wrap");
+        const select = document.getElementById("af-tenant");
+        if (!wrap || !select) return;
+        if (!isSupervisorRole()) {
+          wrap.style.display = "none";
+          return;
+        }
+        wrap.style.display = "block";
+        const current = getSupervisorTenantId();
+        select.innerHTML = '<option value="">— اختر المدرسة —</option>';
+        supervisorTenants.forEach((tenant) => {
+          const option = document.createElement("option");
+          option.value = tenant.id;
+          option.textContent = `${tenant.code} - ${tenant.name}`;
+          select.appendChild(option);
+        });
+        if (current && supervisorTenants.some((tenant) => tenant.id === current)) {
+          select.value = current;
+        } else if (supervisorTenants.length) {
+          select.value = supervisorTenants[0].id;
+          setSupervisorTenantId(select.value);
+        }
+        updateSupervisorWelcome(select.value || "");
       }
 
       function initAdminTableScrollSync() {
@@ -3404,19 +4234,45 @@
       async function apiGet(params) {
         const token = sessionStorage.getItem("school_session_token") || "";
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const sessionRole = String(sessionStorage.getItem(SESSION_ROLE_KEY) || "").trim();
+        const superContext = getSuperImpersonationContext();
+        const isSuperAdminMode = sessionRole === "super" && superContext?.mode === "admin" && !!superContext.tenantId;
+        const isSupervisorMode = sessionRole === "supervisor";
+        const supervisorTenantId = getSupervisorTenantId();
+        if (params.action === "supervisorTenants") {
+          const res = await fetch(withApiBase("/api/v1/supervisor/tenants"), { method: "GET", headers });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || ("فشل الاتصال HTTP " + res.status));
+          return data;
+        }
         if (params.action === 'lookups') {
-          const res = await fetch(withApiBase('/api/v1/lookups'), { method: 'GET', headers });
+          const url = new URL(withApiBase('/api/v1/lookups'));
+          if (isSuperAdminMode) url.searchParams.set('tenantId', superContext.tenantId);
+          if (isSupervisorMode) {
+            if (!supervisorTenantId) throw new Error("يرجى اختيار المدرسة أولاً");
+            url.searchParams.set("tenantId", supervisorTenantId);
+          }
+          const res = await fetch(url.toString(), { method: 'GET', headers });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data?.error || ('فشل الاتصال HTTP ' + res.status));
           return data;
         }
         if (params.action === 'getData') {
-          const res = await fetch(withApiBase('/api/v1/submissions'), { method: 'GET', headers });
+          const url = new URL(withApiBase('/api/v1/submissions'));
+          if (isSuperAdminMode) url.searchParams.set('tenantId', superContext.tenantId);
+          if (isSupervisorMode) {
+            if (!supervisorTenantId) throw new Error("يرجى اختيار المدرسة أولاً");
+            url.searchParams.set("tenantId", supervisorTenantId);
+          }
+          const res = await fetch(url.toString(), { method: 'GET', headers });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data?.error || ('فشل الاتصال HTTP ' + res.status));
           return data;
         }
         if (params.action === 'adminAssignments') {
+          if (isSuperAdminMode || isSupervisorMode) {
+            return { ok: true, assignments: [] };
+          }
           const res = await fetch(withApiBase('/api/v1/admin/assignments'), { method: 'GET', headers });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data?.error || ('فشل الاتصال HTTP ' + res.status));
@@ -3429,6 +4285,25 @@
         const tbody = document.getElementById('adminTbody');
         tbody.innerHTML = '<tr class="loading-row"><td colspan="13">جاري تحميل البيانات... <span class="spinner"></span></td></tr>';
         startLoading("جارٍ تحميل البيانات...");
+
+        if (isSupervisorRole()) {
+          try {
+            if (!supervisorTenants.length) {
+              const tenantsRes = await apiGet({ action: "supervisorTenants" });
+              supervisorTenants = Array.isArray(tenantsRes?.items) ? tenantsRes.items : [];
+            }
+            fillSupervisorTenantSelect();
+            if (!getSupervisorTenantId()) {
+              tbody.innerHTML = '<tr class="loading-row"><td colspan="13">يرجى اختيار المدرسة لعرض الإحصائيات</td></tr>';
+              stopLoading();
+              return;
+            }
+          } catch (error) {
+            tbody.innerHTML = `<tr class="loading-row"><td colspan="13" style="color:var(--bad);">${esc(error.message || 'تعذر تحميل المدارس')}</td></tr>`;
+            stopLoading();
+            return;
+          }
+        }
 
         // ── Step 1: load assignments for dynamic dependent filters ──
         try {
@@ -3486,7 +4361,22 @@
         }
       }
       function init() {
+        if (initialized) return;
+        initialized = true;
         initAdminTableScrollSync();
+
+        const tenantWrap = document.getElementById("af-tenant-wrap");
+        const tenantSelect = document.getElementById("af-tenant");
+        if (tenantWrap) tenantWrap.style.display = isSupervisorRole() ? "block" : "none";
+        if (tenantSelect) {
+          tenantSelect.addEventListener("change", () => {
+            const tenantId = String(tenantSelect.value || "").trim();
+            setSupervisorTenantId(tenantId);
+            updateSupervisorWelcome(tenantId);
+            resetAdminFilters(false);
+            loadData();
+          });
+        }
 
         // Filter change listeners
         ['af-teacher','af-grade','af-section','af-subject','af-exam','af-level'].forEach(id => {
@@ -3611,6 +4501,13 @@
         const tbody = document.getElementById('superUsersTbody');
         if (!tbody) return;
         const rows = users;
+        const roleLabel = (role) => {
+          if (role === 'super_admin') return 'أدمن منصة';
+          if (role === 'edu_supervisor') return 'مشرف تربوي';
+          if (role === 'school_admin') return 'مديرة';
+          if (role === 'teacher') return 'معلمة';
+          return role || '—';
+        };
         if (!rows.length) {
           tbody.innerHTML = '<tr><td colspan="8" class="loading-row">لا توجد حسابات</td></tr>';
           return;
@@ -3623,7 +4520,7 @@
               <td>${esc(user.username)}</td>
               <td>${esc(user.passwordPlain || '-')}</td>
               <td>${esc(user.displayName || '-')}</td>
-              <td>${esc(user.role)}</td>
+              <td>${esc(roleLabel(user.role))}</td>
               <td>${user.active ? 'مفعل' : 'موقوف'}</td>
               <td>${esc((tenants.find((tenant) => tenant.id === user.tenantId) || {}).code || '-')}</td>
               <td>
@@ -3975,6 +4872,7 @@
           renderUsersTable();
           renderTeachersTable();
           renderStudentsTable();
+          updateSuperModeUi();
 
           succeed('تم تحديث بيانات المنصة');
         } catch (error) {
@@ -4070,32 +4968,37 @@
         const createAdminBtn = document.getElementById('superCreateAdminBtn');
         if (createAdminBtn) {
           createAdminBtn.addEventListener('click', async () => {
+            const accountRole = cleanInput(document.getElementById('superPlatformRole')?.value);
             const username = cleanInput(document.getElementById('superAdminUserName')?.value).toLowerCase();
             const displayName = cleanInput(document.getElementById('superAdminDisplay')?.value);
             const password = cleanInput(document.getElementById('superAdminPassword')?.value);
+            const role = accountRole === 'edu_supervisor' ? 'edu_supervisor' : 'super_admin';
             if (!username || !password) {
               fail('يرجى إدخال اسم المستخدم وكلمة المرور');
               return;
             }
             try {
-              startLoading('جارٍ إنشاء حساب أدمن...');
+              startLoading(role === 'edu_supervisor' ? 'جارٍ إنشاء حساب مشرف تربوي...' : 'جارٍ إنشاء حساب أدمن...');
               await api('/api/v1/super/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  role: 'super_admin',
+                  role,
                   username,
                   displayName: displayName || username,
                   password
                 })
               });
+              if (document.getElementById('superPlatformRole')) {
+                document.getElementById('superPlatformRole').value = 'super_admin';
+              }
               document.getElementById('superAdminUserName').value = '';
               document.getElementById('superAdminDisplay').value = '';
               document.getElementById('superAdminPassword').value = '';
               await loadData();
-              succeed('تم إنشاء حساب الأدمن');
+              succeed(role === 'edu_supervisor' ? 'تم إنشاء حساب المشرف التربوي' : 'تم إنشاء حساب الأدمن');
             } catch (error) {
-              fail(error.message || 'تعذر إنشاء حساب الأدمن');
+              fail(error.message || 'تعذر إنشاء الحساب');
             }
           });
         }
@@ -4165,14 +5068,26 @@
       const acctSaveBtn = document.getElementById('acctSaveBtn');
       const acctLogoutBtn = document.getElementById('acctLogoutBtn');
       const acctMsg = document.getElementById('acctMsg');
+      const acctSuperSwitchWrap = document.getElementById('acctSuperSwitchWrap');
+      const acctSuperModeEl = document.getElementById('acctSuperMode');
+      const acctSuperTenantWrap = document.getElementById('acctSuperTenantWrap');
+      const acctSuperTenantEl = document.getElementById('acctSuperTenant');
+      const acctSuperTeacherWrap = document.getElementById('acctSuperTeacherWrap');
+      const acctSuperTeacherEl = document.getElementById('acctSuperTeacher');
+      const acctSuperApplyRoleBtn = document.getElementById('acctSuperApplyRole');
+      const acctSuperMsgEl = document.getElementById('acctSuperMsg');
       const teacherWelcomeText = document.getElementById('teacherWelcomeText');
       const adminWelcomeText = document.getElementById('adminWelcomeText');
       const superWelcomeText = document.getElementById('superWelcomeText');
+      let acctSuperTenants = [];
+      let acctSuperTeachers = [];
+      let acctSuperOptionsLoaded = false;
 
       function mapApiRoleToUiRole(apiRole) {
         if (apiRole === 'teacher') return 'teacher';
         if (apiRole === 'school_admin') return 'admin';
         if (apiRole === 'super_admin') return 'super';
+        if (apiRole === 'edu_supervisor') return 'supervisor';
         return '';
       }
 
@@ -4209,6 +5124,148 @@
         el.className = 'status-bar show' + (type ? ' ' + type : '');
         el.style.display = msg ? 'flex' : 'none';
       }
+      function showAccountSuperMsg(msg = '', type = '') {
+        showAccountMsg(acctSuperMsgEl, msg, type);
+      }
+      function isSuperSession() {
+        return String(sessionStorage.getItem(SESSION_KEY) || '').trim() === 'super';
+      }
+      function accountAuthHeaders(extra = {}) {
+        const token = String(sessionStorage.getItem(SESSION_TOKEN_KEY) || '').trim();
+        return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+      }
+      function syncAccountRoleSwitchVisibility() {
+        const isSuper = isSuperSession();
+        if (acctSuperSwitchWrap) acctSuperSwitchWrap.style.display = isSuper ? 'block' : 'none';
+        if (!isSuper) showAccountSuperMsg('', '');
+      }
+      function fillAccountSuperTenantSelect(selectedTenantId = '') {
+        if (!acctSuperTenantEl) return;
+        const selected = String(selectedTenantId || '').trim();
+        acctSuperTenantEl.innerHTML = '<option value="">— اختر المدرسة —</option>';
+        acctSuperTenants.forEach((tenant) => {
+          const option = document.createElement('option');
+          option.value = tenant.id;
+          option.textContent = `${tenant.code} - ${tenant.name}`;
+          acctSuperTenantEl.appendChild(option);
+        });
+        if (selected && acctSuperTenants.some((tenant) => tenant.id === selected)) {
+          acctSuperTenantEl.value = selected;
+        }
+      }
+      function fillAccountSuperTeacherSelect(tenantId = '', selectedTeacherId = '') {
+        if (!acctSuperTeacherEl) return;
+        const normalizedTenantId = String(tenantId || '').trim();
+        const selected = String(selectedTeacherId || '').trim();
+        const rows = acctSuperTeachers.filter((teacher) => String(teacher.tenantId || '') === normalizedTenantId);
+        acctSuperTeacherEl.innerHTML = '<option value="">— اختر المعلم —</option>';
+        rows.forEach((teacher) => {
+          const option = document.createElement('option');
+          option.value = teacher.id;
+          option.textContent = teacher.displayName || teacher.username || '—';
+          acctSuperTeacherEl.appendChild(option);
+        });
+        if (selected && rows.some((teacher) => teacher.id === selected)) {
+          acctSuperTeacherEl.value = selected;
+        }
+      }
+      function syncAccountRoleSwitchSelectors({ keepTeacher = true } = {}) {
+        const mode = String(acctSuperModeEl?.value || '').trim();
+        const isScopedMode = mode === 'admin' || mode === 'teacher';
+        if (acctSuperTenantWrap) acctSuperTenantWrap.style.display = isScopedMode ? 'block' : 'none';
+        if (acctSuperTeacherWrap) acctSuperTeacherWrap.style.display = mode === 'teacher' ? 'block' : 'none';
+        if (mode === 'teacher') {
+          fillAccountSuperTeacherSelect(acctSuperTenantEl?.value || '', keepTeacher ? acctSuperTeacherEl?.value || '' : '');
+        }
+      }
+      async function fetchAccountSuperOptions(force = false) {
+        if (!isSuperSession()) return;
+        if (acctSuperOptionsLoaded && !force) return;
+        const [tenantsRes, teachersRes] = await Promise.all([
+          fetch(withApiBase('/api/v1/super/tenants?page=1&pageSize=300'), {
+            method: 'GET',
+            headers: accountAuthHeaders()
+          }),
+          fetch(withApiBase('/api/v1/super/teachers'), {
+            method: 'GET',
+            headers: accountAuthHeaders()
+          })
+        ]);
+        const tenantsData = await tenantsRes.json().catch(() => ({}));
+        if (!tenantsRes.ok) {
+          throw new Error(tenantsData?.error || 'تعذر تحميل المدارس');
+        }
+        const teachersData = await teachersRes.json().catch(() => ({}));
+        if (!teachersRes.ok) {
+          throw new Error(teachersData?.error || 'تعذر تحميل المعلمين');
+        }
+        acctSuperTenants = Array.isArray(tenantsData?.items) ? tenantsData.items : [];
+        acctSuperTeachers = Array.isArray(teachersData?.teachers) ? teachersData.teachers : [];
+        acctSuperOptionsLoaded = true;
+      }
+      async function initAccountRoleSwitch() {
+        syncAccountRoleSwitchVisibility();
+        if (!isSuperSession()) return;
+        try {
+          await fetchAccountSuperOptions(false);
+          const context = getSuperImpersonationContext();
+          const savedMode = context?.mode === 'teacher' ? 'teacher' : (context?.mode === 'admin' ? 'admin' : '');
+          if (acctSuperModeEl) acctSuperModeEl.value = savedMode;
+          fillAccountSuperTenantSelect(context?.tenantId || '');
+          fillAccountSuperTeacherSelect(context?.tenantId || '', context?.teacherId || '');
+          syncAccountRoleSwitchSelectors({ keepTeacher: true });
+          showAccountSuperMsg('', '');
+        } catch (error) {
+          showAccountSuperMsg(error.message || 'تعذر تحميل خيارات الأدوار', 'bad');
+        }
+      }
+      function applyAccountRoleSwitch() {
+        if (!isSuperSession()) return;
+        const mode = String(acctSuperModeEl?.value || '').trim();
+        if (!mode) {
+          exitSuperImpersonation();
+          showAccountSuperMsg('تم الرجوع إلى لوحة أدمن المنصة', 'ok');
+          closeAccountModal();
+          return;
+        }
+        const tenantId = String(acctSuperTenantEl?.value || '').trim();
+        if (!tenantId) {
+          showAccountSuperMsg('يرجى اختيار المدرسة أولاً', 'warn');
+          return;
+        }
+        const tenant = acctSuperTenants.find((item) => item.id === tenantId);
+        if (mode === 'admin') {
+          activateSuperImpersonation({
+            mode: 'admin',
+            tenantId,
+            tenantName: tenant?.name || ''
+          });
+          showAccountSuperMsg(`تم الدخول كمدير: ${tenant?.name || '—'}`, 'ok');
+          closeAccountModal();
+          return;
+        }
+        const teacherId = String(acctSuperTeacherEl?.value || '').trim();
+        if (!teacherId) {
+          showAccountSuperMsg('يرجى اختيار المعلم', 'warn');
+          return;
+        }
+        const teacher = acctSuperTeachers.find(
+          (item) => item.id === teacherId && String(item.tenantId || '') === tenantId
+        );
+        if (!teacher) {
+          showAccountSuperMsg('المعلم المختار غير مرتبط بهذه المدرسة', 'bad');
+          return;
+        }
+        activateSuperImpersonation({
+          mode: 'teacher',
+          tenantId,
+          tenantName: tenant?.name || teacher.schoolName || '',
+          teacherId,
+          teacherName: teacher.displayName || teacher.username || ''
+        });
+        showAccountSuperMsg(`تم الدخول كمعلم: ${teacher.displayName || teacher.username || '—'}`, 'ok');
+        closeAccountModal();
+      }
 
       function setAccountUsername(name) {
         if (acctUserEl) acctUserEl.value = name || '';
@@ -4219,7 +5276,10 @@
           teacherWelcomeText.textContent = `أهلاً ${safeName}`;
         }
         if (adminWelcomeText) {
-          adminWelcomeText.textContent = `أهلاً ${safeName}`;
+          adminWelcomeText.textContent =
+            uiRole === 'supervisor'
+              ? 'أهلاً المشرف التربوي'
+              : `أهلاً ${safeName}`;
         }
         if (superWelcomeText) {
           superWelcomeText.textContent = schoolName
@@ -4232,9 +5292,11 @@
         if (!accountModal) return;
         accountModal.classList.add('visible');
         showAccountMsg(acctMsg, '', '');
+        showAccountSuperMsg('', '');
         if (acctCurrentPassEl) acctCurrentPassEl.value = '';
         if (acctNewUserEl) acctNewUserEl.value = '';
         if (acctNewPassEl) acctNewPassEl.value = '';
+        initAccountRoleSwitch();
       }
 
       function closeAccountModal() {
@@ -4255,21 +5317,36 @@
       function applySession(role) {
         loginScreen.classList.add('hidden');
         if (role === 'teacher') {
+          clearSuperImpersonationContext();
           teacherApp.style.display = 'block';
           adminScreen.classList.remove('visible');
           if (superScreen) superScreen.classList.remove('visible');
           if (typeof loadLookups === 'function') {
             loadLookups();
           }
+          updateSuperModeUi();
         } else if (role === 'admin') {
+          clearSuperImpersonationContext();
           adminScreen.classList.add('visible');
           teacherApp.style.display = 'none';
           if (superScreen) superScreen.classList.remove('visible');
           if (!adminInitialized) {
             adminInitialized = true;
             adminDash.init();
-            adminDash.loadData();
           }
+          adminDash.loadData();
+          updateSuperModeUi();
+        } else if (role === 'supervisor') {
+          clearSuperImpersonationContext();
+          adminScreen.classList.add('visible');
+          teacherApp.style.display = 'none';
+          if (superScreen) superScreen.classList.remove('visible');
+          if (!adminInitialized) {
+            adminInitialized = true;
+            adminDash.init();
+          }
+          adminDash.loadData();
+          updateSuperModeUi();
         } else if (role === 'super') {
           teacherApp.style.display = 'none';
           adminScreen.classList.remove('visible');
@@ -4279,6 +5356,12 @@
             window.superDash.init();
           }
           if (window.superDash) window.superDash.loadData();
+          const savedContext = getSuperImpersonationContext();
+          if (savedContext?.mode === 'admin' || savedContext?.mode === 'teacher') {
+            activateSuperImpersonation(savedContext);
+          } else {
+            updateSuperModeUi();
+          }
         }
       }
 
@@ -4300,6 +5383,7 @@
             return;
           }
           try {
+            clearSuperImpersonationContext();
             sessionStorage.setItem(SESSION_KEY, uiRole);
             sessionStorage.setItem(SESSION_USER_KEY, (res.user && res.user.username) ? res.user.username : user);
             sessionStorage.setItem(SESSION_TOKEN_KEY, res.accessToken || '');
@@ -4339,10 +5423,13 @@
         try {
           sessionStorage.removeItem(SESSION_KEY);
           sessionStorage.removeItem(SESSION_USER_KEY);
-          sessionStorage.removeItem(SESSION_TOKEN_KEY);
-          sessionStorage.removeItem(SESSION_USER_DISPLAY_KEY);
-          sessionStorage.removeItem(SESSION_SCHOOL_NAME_KEY);
-        } catch(_) {}
+            sessionStorage.removeItem(SESSION_TOKEN_KEY);
+            sessionStorage.removeItem(SESSION_USER_DISPLAY_KEY);
+            sessionStorage.removeItem(SESSION_SCHOOL_NAME_KEY);
+            sessionStorage.removeItem(SUPERVISOR_TENANT_KEY);
+            sessionStorage.removeItem(SUPER_IMPERSONATION_KEY);
+          } catch(_) {}
+        clearSuperImpersonationContext();
         loginScreen.classList.remove('hidden');
         adminScreen.classList.remove('visible');
         if (superScreen) superScreen.classList.remove('visible');
@@ -4354,6 +5441,14 @@
         if (acctCurrentPassEl) acctCurrentPassEl.value = '';
         if (acctNewUserEl) acctNewUserEl.value = '';
         if (acctNewPassEl) acctNewPassEl.value = '';
+        if (acctSuperModeEl) acctSuperModeEl.value = '';
+        if (acctSuperTenantEl) acctSuperTenantEl.value = '';
+        if (acctSuperTeacherEl) acctSuperTeacherEl.value = '';
+        acctSuperTenants = [];
+        acctSuperTeachers = [];
+        acctSuperOptionsLoaded = false;
+        showAccountSuperMsg('', '');
+        updateSuperModeUi();
         loginUserEl.focus();
       }
 
@@ -4406,7 +5501,7 @@
         const savedSchool = sessionStorage.getItem(SESSION_SCHOOL_NAME_KEY);
         if (savedUser) setAccountUsername(savedUser);
         setWelcomeText(savedDisplay || savedUser, savedSchool, saved);
-        if (saved === 'teacher' || saved === 'admin' || saved === 'super') {
+        if (saved === 'teacher' || saved === 'admin' || saved === 'super' || saved === 'supervisor') {
           applySession(saved);
         }
       } catch(_) {}
@@ -4418,6 +5513,21 @@
       if (teacherLogout) teacherLogout.addEventListener('click', doLogout);
       if (acctLogoutBtn) acctLogoutBtn.addEventListener('click', doLogout);
       if (acctSaveBtn) acctSaveBtn.addEventListener('click', updateAccount);
+      if (acctSuperModeEl) {
+        acctSuperModeEl.addEventListener('change', () => {
+          syncAccountRoleSwitchSelectors({ keepTeacher: false });
+          showAccountSuperMsg('', '');
+        });
+      }
+      if (acctSuperTenantEl) {
+        acctSuperTenantEl.addEventListener('change', () => {
+          syncAccountRoleSwitchSelectors({ keepTeacher: false });
+          showAccountSuperMsg('', '');
+        });
+      }
+      if (acctSuperApplyRoleBtn) {
+        acctSuperApplyRoleBtn.addEventListener('click', () => applyAccountRoleSwitch());
+      }
       if (acctOpenBtn) acctOpenBtn.addEventListener('click', openAccountModal);
       if (acctOpenBtnAdmin) acctOpenBtnAdmin.addEventListener('click', openAccountModal);
       if (acctOpenBtnSuper) acctOpenBtnSuper.addEventListener('click', openAccountModal);
@@ -4433,7 +5543,3 @@
 
 
     boot();
-
-
-
-
