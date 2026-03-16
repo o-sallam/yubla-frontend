@@ -3993,9 +3993,104 @@
         }
       }
 
+      function normalizeStudentStatsKeyPart(value) {
+        return String(value || '')
+          .toLowerCase()
+          .normalize('NFKC')
+          .replace(/[إأآٱ]/g, 'ا')
+          .replace(/ى/g, 'ي')
+          .replace(/ة/g, 'ه')
+          .replace(/ؤ/g, 'و')
+          .replace(/ئ/g, 'ي')
+          .replace(/[\u064B-\u065F\u0670]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      function makeStudentStatsKey(row) {
+        const name = normalizeStudentStatsKeyPart(row?.studentName || row?.name || '');
+        const grade = normalizeStudentStatsKeyPart(row?.grade || '');
+        const section = normalizeStudentStatsKeyPart(row?.section || '');
+        return name ? `${name}|${grade}|${section}` : '';
+      }
+
+      function buildStudentStats(rows) {
+        const grouped = new Map();
+
+        for (const r of rows) {
+          const key = makeStudentStatsKey(r);
+          if (!key) continue;
+
+          let student = grouped.get(key);
+          if (!student) {
+            student = {
+              sumRecallPct: 0,
+              recallPctCount: 0,
+              sumUnderstandPct: 0,
+              understandPctCount: 0,
+              sumHotsPct: 0,
+              hotsPctCount: 0,
+              sumTotalPct: 0,
+              totalPctCount: 0
+            };
+            grouped.set(key, student);
+          }
+
+          const recall = Number(r.recall) || 0;
+          const understand = Number(r.understand) || 0;
+          const hots = Number(r.hots) || 0;
+          const total = Number(r.total) || 0;
+          const maxRecall = Number(r.maxRecall) || 0;
+          const maxUnderstand = Number(r.maxUnderstand) || 0;
+          const maxHots = Number(r.maxHots) || 0;
+          const totalMax = Number(r.totalMax) || (maxRecall + maxUnderstand + maxHots);
+
+          if (maxRecall > 0) {
+            student.sumRecallPct += (recall / maxRecall) * 100;
+            student.recallPctCount += 1;
+          }
+          if (maxUnderstand > 0) {
+            student.sumUnderstandPct += (understand / maxUnderstand) * 100;
+            student.understandPctCount += 1;
+          }
+          if (maxHots > 0) {
+            student.sumHotsPct += (hots / maxHots) * 100;
+            student.hotsPctCount += 1;
+          }
+          if (totalMax > 0) {
+            student.sumTotalPct += (total / totalMax) * 100;
+            student.totalPctCount += 1;
+          }
+        }
+
+        return Array.from(grouped.values()).map((student) => {
+          const avgRecallPct = student.recallPctCount > 0 ? (student.sumRecallPct / student.recallPctCount) : null;
+          const avgUnderstandPct = student.understandPctCount > 0 ? (student.sumUnderstandPct / student.understandPctCount) : null;
+          const avgHotsPct = student.hotsPctCount > 0 ? (student.sumHotsPct / student.hotsPctCount) : null;
+          const avgTotalPct = student.totalPctCount > 0 ? (student.sumTotalPct / student.totalPctCount) : 0;
+          const weakSkills = getWeakSkills(
+            avgRecallPct ?? 0,
+            avgUnderstandPct ?? 0,
+            avgHotsPct ?? 0,
+            avgRecallPct === null ? 0 : 100,
+            avgUnderstandPct === null ? 0 : 100,
+            avgHotsPct === null ? 0 : 100
+          ) || [];
+
+          return {
+            avgRecallPct,
+            avgUnderstandPct,
+            avgHotsPct,
+            avgTotalPct,
+            weakSkills
+          };
+        });
+      }
+
       function computeStats(rows) {
         const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-        const n = rows.length;
+        const studentStats = buildStudentStats(rows);
+        const n = studentStats.length;
 
         // إعادة تعيين الكاردات
         ['avg-recall','avg-understand','avg-hots','avg-total'].forEach(k => {
@@ -4010,6 +4105,7 @@
             'sc-no-weak','sc-weak-recall','sc-weak-understand','sc-weak-hots',
             'sc-weak-one','sc-weak-two','sc-weak-all'
           ].forEach(id => set(id,'—'));
+          set('sc-count-sub', '0 سجل بعد الفلترة');
           ['sc-no-weak-pct','sc-weak-recall-pct','sc-weak-understand-pct','sc-weak-hots-pct'].forEach(id => set(id,'—% من الإجمالي'));
           ['sc-avg-recall-sub','sc-avg-understand-sub','sc-avg-hots-sub'].forEach(id => set(id,'0 طالبة'));
           ['sc-weak-one-sub','sc-weak-two-sub','sc-weak-all-sub'].forEach(id => set(id,'—% من الإجمالي'));
@@ -4023,38 +4119,25 @@
         let noWeak=0, weakRecall=0, weakUnderstand=0, weakHots=0;
         let weakOne=0, weakTwo=0, weakAll=0;
 
-        for (const r of rows) {
-          const recall = Number(r.recall)||0;
-          const understand = Number(r.understand)||0;
-          const hots = Number(r.hots)||0;
-          const total = Number(r.total)||0;
-          const maxRecall = Number(r.maxRecall)||0;
-          const maxUnderstand = Number(r.maxUnderstand)||0;
-          const maxHots = Number(r.maxHots)||0;
-          const totalMax = Number(r.totalMax)||(maxRecall+maxUnderstand+maxHots);
-
-          if (maxRecall > 0) {
-            sumRecallPct += (recall / maxRecall) * 100;
+        for (const student of studentStats) {
+          if (student.avgRecallPct !== null) {
+            sumRecallPct += student.avgRecallPct;
             recallPctCount += 1;
           }
-          if (maxUnderstand > 0) {
-            sumUnderstandPct += (understand / maxUnderstand) * 100;
+          if (student.avgUnderstandPct !== null) {
+            sumUnderstandPct += student.avgUnderstandPct;
             understandPctCount += 1;
           }
-          if (maxHots > 0) {
-            sumHotsPct += (hots / maxHots) * 100;
+          if (student.avgHotsPct !== null) {
+            sumHotsPct += student.avgHotsPct;
             hotsPctCount += 1;
           }
+          sumTotalPct += student.avgTotalPct;
+          totalPctCount += 1;
 
-          if (totalMax > 0) {
-            sumTotalPct += (total / totalMax) * 100;
-            totalPctCount += 1;
-          }
+          if (student.avgTotalPct >= (PASS_THRESHOLD_PCT * 100)) pass++; else fail++;
 
-          const threshold = totalMax > 0 ? totalMax * PASS_THRESHOLD_PCT : Infinity;
-          if (total >= threshold) pass++; else fail++;
-
-          const weakSkills = getWeakSkills(recall, understand, hots, maxRecall, maxUnderstand, maxHots) || [];
+          const weakSkills = student.weakSkills;
           if (weakSkills.length === 0) {
             noWeak += 1;
           } else {
@@ -4079,6 +4162,7 @@
         const pctTot = totalPctCount > 0 ? avgTotalPct : null;
 
         set('sc-count', n);
+        set('sc-count-sub', `${rows.length} سجل بعد الفلترة`);
         set('sc-avg-total', numF(avgTotalPct,1));
         colorCard(document.getElementById('sc-avg-total-card'), document.getElementById('sc-avg-total'), pctTot);
 
@@ -4096,6 +4180,8 @@
 
         set('sc-pass', pass);
         set('sc-fail', fail);
+        set('sc-pass-sub', 'متوسط الطالبة ≥ 50%');
+        set('sc-fail-sub', 'متوسط الطالبة < 50%');
 
         set('sc-no-weak', noWeak);
         set('sc-weak-recall', weakRecall);
